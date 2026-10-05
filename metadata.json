@@ -1,0 +1,6 @@
+{
+  "name": "TradeSense AI - Trading Agent & Market Research",
+  "description": "Autonomous AI trading agent and research terminal for the Indian stock market (NSE/BSE) and Groww, featuring real-time small-to-large cap stock analysis, news catalysts, trade vs. avoid verdicts, backtesting, and paper execution.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
