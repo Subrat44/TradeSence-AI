@@ -225,11 +225,22 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
     fetchGrowwOrders();
   }, []);
 
+  const assetsRef = useRef(assets);
+  useEffect(() => {
+    assetsRef.current = assets;
+  }, [assets]);
+
+  const selectedAssetRef = useRef(selectedAsset);
+  useEffect(() => {
+    selectedAssetRef.current = selectedAsset;
+  }, [selectedAsset]);
+
   // Synchronize Live Prices directly from NSE/BSE & Google Finance/Groww
   const syncLivePrices = useCallback(async (silent = false) => {
     if (!silent) setIsLiveSyncing(true);
     try {
-      const symbolsToFetch = assets.map((a) => a.symbol).join(",");
+      const currentAssetList = assetsRef.current;
+      const symbolsToFetch = currentAssetList.map((a) => a.symbol).join(",");
       const res = await fetch(`/api/market/quotes?symbols=${encodeURIComponent(symbolsToFetch)}`);
       if (res.ok) {
         const data = await res.json();
@@ -263,6 +274,21 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
           })
         );
 
+        // Also update selectedAsset if its live quote was returned
+        const activeSym = selectedAssetRef.current.symbol;
+        if (quotes[activeSym]) {
+          const live = quotes[activeSym];
+          setSelectedAsset((prev) => ({
+            ...prev,
+            price: live.price,
+            change24h: live.change24h,
+            changePercent: live.changePercent,
+            high24h: live.high24h || prev.high24h,
+            low24h: live.low24h || prev.low24h,
+            volume24h: live.volume24h || prev.volume24h,
+          }));
+        }
+
         setLastLiveSyncTime(
           new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
         );
@@ -272,7 +298,7 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
     } finally {
       if (!silent) setIsLiveSyncing(false);
     }
-  }, [assets]);
+  }, []);
 
   // Fetch real historical candlestick data from exchange for selected asset & timeframe
   const fetchRealHistoryForSelectedAsset = useCallback(async (symbol: string, tf: string) => {
@@ -296,7 +322,8 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
       const res = await fetch(`/api/market/quote?symbol=${encodeURIComponent(symbol)}&range=${range}&interval=${interval}`);
       if (res.ok) {
         const q = await res.json();
-        if (Array.isArray(q.candles) && q.candles.length >= 5) {
+        if (typeof q.price === "number") {
+          const hasCandles = Array.isArray(q.candles) && q.candles.length >= 5;
           setAssets((prev) =>
             prev.map((a) =>
               a.symbol === symbol
@@ -308,10 +335,24 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
                     high24h: q.high24h ?? a.high24h,
                     low24h: q.low24h ?? a.low24h,
                     volume24h: q.volume24h || a.volume24h,
-                    history: q.candles,
+                    history: hasCandles ? q.candles : a.history,
                   }
                 : a
             )
+          );
+          setSelectedAsset((prev) =>
+            prev.symbol === symbol
+              ? {
+                  ...prev,
+                  price: q.price || prev.price,
+                  change24h: q.change24h ?? prev.change24h,
+                  changePercent: q.changePercent ?? prev.changePercent,
+                  high24h: q.high24h ?? prev.high24h,
+                  low24h: q.low24h ?? prev.low24h,
+                  volume24h: q.volume24h || prev.volume24h,
+                  history: hasCandles ? q.candles : prev.history,
+                }
+              : prev
           );
         }
       }
@@ -323,26 +364,18 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
   // Initial mount: Fetch exact real-time prices & initiate on-time live polling
   useEffect(() => {
     syncLivePrices(false);
-    // Poll every 6 seconds for on-time live market quotes
+    // Poll every 8 seconds for on-time live market quotes
     const interval = setInterval(() => {
       syncLivePrices(true);
-    }, 6000);
+    }, 8000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [syncLivePrices]);
 
   // When selectedAsset or timeframe changes, load real exchange candlesticks
   useEffect(() => {
     fetchRealHistoryForSelectedAsset(selectedAsset.symbol, timeframe);
   }, [selectedAsset.symbol, timeframe, fetchRealHistoryForSelectedAsset]);
-
-  // Synchronize selectedAsset with ticking assets list
-  useEffect(() => {
-    const updated = assets.find((a) => a.symbol === selectedAsset.symbol);
-    if (updated && updated.price !== selectedAsset.price) {
-      setSelectedAsset(updated);
-    }
-  }, [assets, selectedAsset.symbol]);
 
   // Synchronize paperAccount positions with live asset prices
   useEffect(() => {
