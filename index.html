@@ -12,6 +12,46 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+      // Early theme detection to prevent flash of wrong theme (FOUC)
+      (function() {
+        try {
+          var saved = localStorage.getItem('tradesense_theme_mode');
+          var isDark = true;
+          if (saved === 'light') {
+            isDark = false;
+          } else if (saved === 'dark') {
+            isDark = true;
+          } else {
+            isDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+          }
+          var theme = isDark ? 'dark' : 'light';
+          document.documentElement.setAttribute('data-theme', theme);
+          document.documentElement.classList.add(theme);
+        } catch (e) {}
+      })();
+
+      // Gracefully ignore WebSocket / Vite HMR disconnection errors in cloud preview
+      window.addEventListener('unhandledrejection', function (event) {
+        if (
+          event.reason &&
+          (typeof event.reason.message === 'string' &&
+            (event.reason.message.includes('WebSocket') ||
+             event.reason.message.includes('vite:ws')))
+        ) {
+          event.preventDefault();
+        }
+      });
+      window.addEventListener('error', function (event) {
+        if (
+          event.message &&
+          (event.message.includes('WebSocket') ||
+           (event.filename && event.filename.includes('@vite/client')))
+        ) {
+          event.preventDefault();
+        }
+      });
+    </script>
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased font-sans selection:bg-cyan-500/30 selection:text-cyan-200">
     <div id="root"></div>

@@ -1,1 +1,182 @@
 @import "tailwindcss";
+
+/* Base design tokens & theme transitions */
+:root {
+  color-scheme: dark;
+  --theme-transition-duration: 200ms;
+}
+
+/* Dark Theme (Default high-conviction financial terminal) */
+:root[data-theme="dark"],
+.dark {
+  color-scheme: dark;
+  --color-slate-950: #020617;
+  --color-slate-900: #0f172a;
+  --color-slate-850: #131d32;
+  --color-slate-800: #1e293b;
+  --color-slate-700: #334155;
+  --color-slate-600: #475569;
+  --color-slate-500: #64748b;
+  --color-slate-400: #94a3b8;
+  --color-slate-300: #cbd5e1;
+  --color-slate-200: #e2e8f0;
+  --color-slate-100: #f1f5f9;
+  --color-slate-50: #f8fafc;
+}
+
+/* Light Theme (Institutional Daylight Terminal - Bloomberg & Groww style) */
+:root[data-theme="light"],
+.light {
+  color-scheme: light;
+  --color-slate-950: #f1f5f9; /* Overall app canvas */
+  --color-slate-900: #ffffff; /* Primary cards, modals, headers */
+  --color-slate-850: #f8fafc; /* Inset panels, subcards */
+  --color-slate-800: #e2e8f0; /* Subtle borders, divider rules */
+  --color-slate-700: #cbd5e1; /* Secondary active borders */
+  --color-slate-600: #94a3b8; /* Inactive borders */
+  --color-slate-500: #64748b; /* Secondary metadata text */
+  --color-slate-400: #475569; /* Regular body & description text */
+  --color-slate-300: #334155; /* Medium headers & strong labels */
+  --color-slate-200: #1e293b; /* Prominent titles */
+  --color-slate-100: #0f172a; /* Deepest headings */
+  --color-slate-50: #020617;
+}
+
+/* Light Mode Direct Rules & Fallbacks */
+[data-theme="light"] {
+  color: #0f172a;
+}
+
+[data-theme="light"] body {
+  background-color: #f1f5f9;
+  color: #0f172a;
+}
+
+/* In light mode, convert surface text-white to high-contrast dark text */
+[data-theme="light"] .text-white:not(.keep-white):not(.preserve-white) {
+  color: #0f172a;
+}
+
+/* Explicit exceptions where white text MUST remain white (e.g. solid colored buttons & badges) */
+[data-theme="light"] button.bg-emerald-500,
+[data-theme="light"] button.bg-emerald-600,
+[data-theme="light"] button.bg-rose-500,
+[data-theme="light"] button.bg-rose-600,
+[data-theme="light"] button.bg-cyan-500,
+[data-theme="light"] button.bg-cyan-600,
+[data-theme="light"] button.bg-blue-600,
+[data-theme="light"] button.bg-indigo-600,
+[data-theme="light"] .bg-emerald-600,
+[data-theme="light"] .bg-rose-600,
+[data-theme="light"] .bg-cyan-600,
+[data-theme="light"] .bg-blue-600,
+[data-theme="light"] .bg-indigo-600,
+[data-theme="light"] .bg-gradient-to-tr,
+[data-theme="light"] .bg-gradient-to-br,
+[data-theme="light"] .bg-gradient-to-r,
+[data-theme="light"] [class*="bg-emerald-600"] .text-white,
+[data-theme="light"] [class*="bg-rose-600"] .text-white,
+[data-theme="light"] [class*="bg-cyan-600"] .text-white,
+[data-theme="light"] [class*="bg-blue-600"] .text-white,
+[data-theme="light"] [class*="bg-indigo-600"] .text-white,
+[data-theme="light"] .keep-white,
+[data-theme="light"] .preserve-white {
+  color: #ffffff !important;
+}
+
+/* Light Mode Background & Surface Fallbacks */
+[data-theme="light"] .bg-slate-950 {
+  background-color: #f1f5f9;
+}
+[data-theme="light"] .bg-slate-950\/90 {
+  background-color: rgba(241, 245, 249, 0.92);
+}
+[data-theme="light"] .bg-slate-950\/80 {
+  background-color: rgba(241, 245, 249, 0.85);
+}
+[data-theme="light"] .bg-slate-950\/60 {
+  background-color: rgba(241, 245, 249, 0.65);
+}
+[data-theme="light"] .bg-slate-950\/40 {
+  background-color: rgba(241, 245, 249, 0.45);
+}
+
+[data-theme="light"] .bg-slate-900 {
+  background-color: #ffffff;
+}
+[data-theme="light"] .bg-slate-900\/95 {
+  background-color: rgba(255, 255, 255, 0.96);
+}
+[data-theme="light"] .bg-slate-900\/90 {
+  background-color: rgba(255, 255, 255, 0.92);
+}
+[data-theme="light"] .bg-slate-900\/80 {
+  background-color: rgba(255, 255, 255, 0.85);
+}
+[data-theme="light"] .bg-slate-900\/70 {
+  background-color: rgba(255, 255, 255, 0.75);
+}
+[data-theme="light"] .bg-slate-900\/60 {
+  background-color: rgba(255, 255, 255, 0.65);
+}
+[data-theme="light"] .bg-slate-900\/40 {
+  background-color: rgba(255, 255, 255, 0.45);
+}
+
+[data-theme="light"] .bg-slate-800 {
+  background-color: #e2e8f0;
+}
+[data-theme="light"] .bg-slate-850 {
+  background-color: #f8fafc;
+}
+
+/* Light Mode Borders */
+[data-theme="light"] .border-slate-800,
+[data-theme="light"] .border-slate-800\/80,
+[data-theme="light"] .border-slate-800\/70,
+[data-theme="light"] .border-slate-800\/60 {
+  border-color: #e2e8f0;
+}
+[data-theme="light"] .border-slate-700 {
+  border-color: #cbd5e1;
+}
+
+/* Light Mode Text Legibility */
+[data-theme="light"] .text-slate-400 {
+  color: #475569;
+}
+[data-theme="light"] .text-slate-300 {
+  color: #334155;
+}
+[data-theme="light"] .text-slate-200 {
+  color: #1e293b;
+}
+[data-theme="light"] .text-slate-100 {
+  color: #0f172a;
+}
+
+/* In light mode, give elevated cards a crisp soft drop shadow */
+[data-theme="light"] .bg-slate-900,
+[data-theme="light"] .bg-slate-900\/90,
+[data-theme="light"] .bg-slate-900\/95 {
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05), 0 1px 2px -1px rgba(0, 0, 0, 0.05);
+}
+
+/* Clean scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-slate-700);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-slate-600);
+}

@@ -9,6 +9,7 @@ import { PaperPortfolioModal } from "./components/Portfolio/PaperPortfolioModal"
 import { TradeVerdictMatrix } from "./components/Screener/TradeVerdictMatrix";
 import { IndianMarketNews } from "./components/News/IndianMarketNews";
 import { GrowwConnectionModal } from "./components/Groww/GrowwConnectionModal";
+import { ThemeToggle } from "./components/ThemeToggle";
 import { INITIAL_ASSETS, INITIAL_INDIAN_NEWS } from "./data/mockAssets";
 import { 
   Asset, 
@@ -1065,6 +1066,17 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
         recentOrders={growwOrders}
         isLoading={isGrowwLoading}
       />
+
+      {/* Floating Left-Corner Quick Theme Bar (Pinned over bottom-left corner) */}
+      <aside 
+        aria-label="Theme selector"
+        className="fixed bottom-4 left-4 z-40 hidden md:flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-slate-900/95 border border-slate-800 shadow-xl backdrop-blur-md transition-all duration-200 hover:border-emerald-500/50"
+      >
+        <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">
+          Theme:
+        </span>
+        <ThemeToggle />
+      </aside>
     </div>
   );
 }

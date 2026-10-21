@@ -6,15 +6,16 @@ import {
   FlaskConical, 
   Briefcase, 
   Sparkles, 
-  Activity,
-  ShieldAlert,
-  Layers,
-  CheckCircle2,
-  Newspaper,
-  ExternalLink,
-  Key
+  Activity, 
+  ShieldAlert, 
+  Layers, 
+  CheckCircle2, 
+  Newspaper, 
+  ExternalLink, 
+  Key 
 } from "lucide-react";
 import { Asset, PaperAccount, GrowwConfig } from "../types";
+import { ThemeToggle } from "./ThemeToggle";
 
 export type TabType = "screener" | "terminal" | "news" | "research" | "backtest" | "portfolio";
 
@@ -58,8 +59,11 @@ export const Header: React.FC<HeaderProps> = ({
     <header className="border-b border-slate-800 bg-slate-900/95 backdrop-blur-md sticky top-0 z-30 shadow-lg">
       {/* Top Bar: Brand, Market Status, Navigation, and Capital */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2.5 flex flex-col lg:flex-row items-center justify-between gap-3">
-        {/* Brand & Market Status */}
+        {/* Brand & Market Status with Left Corner Theme Selector */}
         <div className="flex items-center gap-3 w-full lg:w-auto justify-between lg:justify-start">
+          {/* Left Corner Theme Switcher (Dark, Light, Desktop Default) */}
+          <ThemeToggle className="mr-1" />
+
           <div className="flex items-center gap-2.5">
             <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-cyan-500 p-0.5 shadow-lg shadow-emerald-500/20">
               <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
