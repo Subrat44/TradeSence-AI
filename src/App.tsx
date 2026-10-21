@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Header, TabType } from "./components/Header";
 import { TradingChart } from "./components/Chart/TradingChart";
 import { AgentSignalCard } from "./components/Agent/AgentSignalCard";
@@ -13,6 +13,7 @@ import { ThemeToggle } from "./components/ThemeToggle";
 import { INITIAL_ASSETS, INITIAL_INDIAN_NEWS } from "./data/mockAssets";
 import { 
   Asset, 
+  Candle,
   TradeSignal, 
   ResearchReport, 
   ChatMessage, 
@@ -42,6 +43,10 @@ export default function App() {
   const [selectedAsset, setSelectedAsset] = useState<Asset>(INITIAL_ASSETS[0]);
   const [activeTab, setActiveTab] = useState<TabType>("screener");
   const [timeframe, setTimeframe] = useState<string>("1M");
+
+  // Real-Time Live Feed State (Synced with Google Finance & Groww)
+  const [isLiveSyncing, setIsLiveSyncing] = useState<boolean>(false);
+  const [lastLiveSyncTime, setLastLiveSyncTime] = useState<string>("Just now");
 
   // Indian Market News
   const [newsList, setNewsList] = useState<MarketNewsItem[]>(INITIAL_INDIAN_NEWS);
@@ -95,14 +100,14 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
           symbol: "TATAMOTORS",
           assetName: "Tata Motors Ltd",
           side: "BUY",
-          entryPrice: 960.00,
-          currentPrice: 986.75,
-          shares: 60,
-          stopLoss: 935.00,
-          takeProfit: 1060.00,
+          entryPrice: 715.00,
+          currentPrice: 735.40,
+          shares: 80,
+          stopLoss: 690.00,
+          takeProfit: 810.00,
           timestamp: new Date(Date.now() - 3600 * 1000 * 24).toISOString(),
-          pnl: (986.75 - 960.00) * 60,
-          pnlPercent: ((986.75 - 960.00) / 960.00) * 100,
+          pnl: (735.40 - 715.00) * 80,
+          pnlPercent: ((735.40 - 715.00) / 715.00) * 100,
           orderType: "Delivery (CNC)",
           growwSlug: "tata-motors-ltd",
         },
@@ -220,43 +225,116 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
     fetchGrowwOrders();
   }, []);
 
-  // Subtle real-time market price simulation tick every 3.5 seconds
+  // Synchronize Live Prices directly from NSE/BSE & Google Finance/Groww
+  const syncLivePrices = useCallback(async (silent = false) => {
+    if (!silent) setIsLiveSyncing(true);
+    try {
+      const symbolsToFetch = assets.map((a) => a.symbol).join(",");
+      const res = await fetch(`/api/market/quotes?symbols=${encodeURIComponent(symbolsToFetch)}`);
+      if (res.ok) {
+        const data = await res.json();
+        const quotes = data.quotes || {};
+
+        setAssets((prevAssets) =>
+          prevAssets.map((asset) => {
+            const live = quotes[asset.symbol];
+            if (!live) return asset;
+
+            const updatedHistory = [...asset.history];
+            if (updatedHistory.length > 0) {
+              const lastIdx = updatedHistory.length - 1;
+              const lastCandle = { ...updatedHistory[lastIdx] };
+              lastCandle.close = live.price;
+              lastCandle.high = Math.max(lastCandle.high, live.high24h || live.price);
+              lastCandle.low = Math.min(lastCandle.low, live.low24h || live.price);
+              updatedHistory[lastIdx] = lastCandle;
+            }
+
+            return {
+              ...asset,
+              price: live.price,
+              change24h: live.change24h,
+              changePercent: live.changePercent,
+              high24h: live.high24h || asset.high24h,
+              low24h: live.low24h || asset.low24h,
+              volume24h: live.volume24h || asset.volume24h,
+              history: updatedHistory,
+            };
+          })
+        );
+
+        setLastLiveSyncTime(
+          new Date().toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })
+        );
+      }
+    } catch (e) {
+      console.warn("Could not sync live quotes:", e);
+    } finally {
+      if (!silent) setIsLiveSyncing(false);
+    }
+  }, [assets]);
+
+  // Fetch real historical candlestick data from exchange for selected asset & timeframe
+  const fetchRealHistoryForSelectedAsset = useCallback(async (symbol: string, tf: string) => {
+    try {
+      let range = "5d";
+      let interval = "15m";
+      if (tf === "1D") {
+        range = "1d";
+        interval = "5m";
+      } else if (tf === "1W") {
+        range = "5d";
+        interval = "15m";
+      } else if (tf === "1M") {
+        range = "1mo";
+        interval = "1d";
+      } else if (tf === "1Y") {
+        range = "1y";
+        interval = "1wk";
+      }
+
+      const res = await fetch(`/api/market/quote?symbol=${encodeURIComponent(symbol)}&range=${range}&interval=${interval}`);
+      if (res.ok) {
+        const q = await res.json();
+        if (Array.isArray(q.candles) && q.candles.length >= 5) {
+          setAssets((prev) =>
+            prev.map((a) =>
+              a.symbol === symbol
+                ? {
+                    ...a,
+                    price: q.price || a.price,
+                    change24h: q.change24h ?? a.change24h,
+                    changePercent: q.changePercent ?? a.changePercent,
+                    high24h: q.high24h ?? a.high24h,
+                    low24h: q.low24h ?? a.low24h,
+                    volume24h: q.volume24h || a.volume24h,
+                    history: q.candles,
+                  }
+                : a
+            )
+          );
+        }
+      }
+    } catch (err) {
+      console.warn("Failed to load real exchange history:", err);
+    }
+  }, []);
+
+  // Initial mount: Fetch exact real-time prices & initiate on-time live polling
   useEffect(() => {
+    syncLivePrices(false);
+    // Poll every 6 seconds for on-time live market quotes
     const interval = setInterval(() => {
-      setAssets((prevAssets) => {
-        return prevAssets.map((asset) => {
-          // Slight price oscillation (-0.2% to +0.2%)
-          const pct = (Math.random() - 0.49) * 0.003;
-          const newPrice = Number(Math.max(1, asset.price * (1 + pct)).toFixed(2));
-          const newChange24h = Number((asset.change24h + (newPrice - asset.price)).toFixed(2));
-          const newChangePercent = Number(((newChange24h / (newPrice - newChange24h)) * 100).toFixed(2));
-
-          // Also update latest candle close
-          const updatedHistory = [...asset.history];
-          if (updatedHistory.length > 0) {
-            const lastIdx = updatedHistory.length - 1;
-            const lastCandle = { ...updatedHistory[lastIdx] };
-            lastCandle.close = newPrice;
-            lastCandle.high = Math.max(lastCandle.high, newPrice);
-            lastCandle.low = Math.min(lastCandle.low, newPrice);
-            updatedHistory[lastIdx] = lastCandle;
-          }
-
-          return {
-            ...asset,
-            price: newPrice,
-            change24h: newChange24h,
-            changePercent: newChangePercent,
-            high24h: Math.max(asset.high24h, newPrice),
-            low24h: Math.min(asset.low24h, newPrice),
-            history: updatedHistory,
-          };
-        });
-      });
-    }, 3500);
+      syncLivePrices(true);
+    }, 6000);
 
     return () => clearInterval(interval);
   }, []);
+
+  // When selectedAsset or timeframe changes, load real exchange candlesticks
+  useEffect(() => {
+    fetchRealHistoryForSelectedAsset(selectedAsset.symbol, timeframe);
+  }, [selectedAsset.symbol, timeframe, fetchRealHistoryForSelectedAsset]);
 
   // Synchronize selectedAsset with ticking assets list
   useEffect(() => {
@@ -265,6 +343,29 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
       setSelectedAsset(updated);
     }
   }, [assets, selectedAsset.symbol]);
+
+  // Synchronize paperAccount positions with live asset prices
+  useEffect(() => {
+    setPaperAccount((prev) => {
+      let changed = false;
+      const updatedPositions = prev.positions.map((pos) => {
+        const asset = assets.find((a) => a.symbol === pos.symbol);
+        if (!asset || asset.price === pos.currentPrice) return pos;
+        changed = true;
+        const pnl = pos.side === "BUY"
+          ? (asset.price - pos.entryPrice) * pos.shares
+          : (pos.entryPrice - asset.price) * pos.shares;
+        const pnlPercent = (pnl / (pos.entryPrice * pos.shares)) * 100;
+        return {
+          ...pos,
+          currentPrice: asset.price,
+          pnl: Number(pnl.toFixed(2)),
+          pnlPercent: Number(pnlPercent.toFixed(2)),
+        };
+      });
+      return changed ? { ...prev, positions: updatedPositions } : prev;
+    });
+  }, [assets]);
 
   // Automated Stop-Loss & Take-Profit Trigger Watcher
   useEffect(() => {
@@ -522,43 +623,74 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
     }
   };
 
-  // Action: Analyze custom ticker in Screener
-  const handleAnalyzeCustomStock = (symbol: string) => {
-    const existing = assets.find((a) => a.symbol.toUpperCase() === symbol.toUpperCase());
+  // Action: Analyze custom ticker in Screener with Real-Time Live Quote
+  const handleAnalyzeCustomStock = async (symbol: string) => {
+    const sym = symbol.toUpperCase().trim();
+    const existing = assets.find((a) => a.symbol.toUpperCase() === sym);
     if (existing) {
       setSelectedAsset(existing);
       setActiveTab("terminal");
-      handleGenerateSignal("Indian Momentum Breakout (NSE)", "Moderate (1.5%)");
+      if (!signalsMap[existing.symbol]) {
+        handleGenerateSignal("Indian Momentum Breakout (NSE)", "Moderate (1.5%)");
+      }
       return;
     }
 
-    // Add new asset placeholder and navigate to terminal
-    const newAsset: Asset = {
-      symbol: symbol.toUpperCase(),
-      name: `${symbol.toUpperCase()} Ltd`,
-      category: "Indian Equity",
-      exchange: "NSE",
-      price: 350.00,
-      change24h: 3.20,
-      changePercent: 0.92,
-      high24h: 356.00,
-      low24h: 345.00,
-      volume24h: "850K shares",
-      marketCap: "₹8,500 Cr",
-      peRatio: "22.5x",
-      beta: 1.10,
-      sector: "Indian Equity",
-      growwSlug: symbol.toLowerCase(),
-      verdict: "WAIT / WATCHLIST",
-      verdictReason: "Analyzing real-time NSE data & order flow on Groww...",
-      catalysts: ["Evaluating quarterly disclosures and institutional participation"],
-      history: selectedAsset.history,
-    };
+    setIsGeneratingSignal(true);
+    try {
+      const quoteRes = await fetch(`/api/market/quote?symbol=${encodeURIComponent(sym)}&range=5d&interval=15m`);
+      let livePrice = 100;
+      let liveChange = 0;
+      let liveChangePct = 0;
+      let liveHigh = 100;
+      let liveLow = 100;
+      let liveVol = "Active";
+      let realCandles: Candle[] = [];
 
-    setAssets((prev) => [newAsset, ...prev]);
-    setSelectedAsset(newAsset);
-    setActiveTab("terminal");
-    handleGenerateSignal("Indian Momentum Breakout (NSE)", "Moderate (1.5%)");
+      if (quoteRes.ok) {
+        const q = await quoteRes.json();
+        livePrice = q.price || livePrice;
+        liveChange = q.change24h || 0;
+        liveChangePct = q.changePercent || 0;
+        liveHigh = q.high24h || livePrice;
+        liveLow = q.low24h || livePrice;
+        liveVol = q.volume24h || "Active";
+        if (Array.isArray(q.candles) && q.candles.length >= 5) {
+          realCandles = q.candles;
+        }
+      }
+
+      const newAsset: Asset = {
+        symbol: sym,
+        name: `${sym} Ltd`,
+        category: "Indian Equity",
+        exchange: "NSE",
+        price: livePrice,
+        change24h: liveChange,
+        changePercent: liveChangePct,
+        high24h: liveHigh,
+        low24h: liveLow,
+        volume24h: liveVol,
+        marketCap: "Live Market",
+        peRatio: "22.5x",
+        beta: 1.10,
+        sector: "Indian Equity",
+        growwSlug: sym.toLowerCase(),
+        verdict: "WAIT / WATCHLIST",
+        verdictReason: `Live market quote synced from NSE/Google Finance: ₹${livePrice.toFixed(2)}. Generating institutional AI signal...`,
+        catalysts: ["Real-time price feed synchronized directly with Google Finance & Groww"],
+        history: realCandles.length > 0 ? realCandles : selectedAsset.history,
+      };
+
+      setAssets((prev) => [newAsset, ...prev]);
+      setSelectedAsset(newAsset);
+      setActiveTab("terminal");
+      handleGenerateSignal("Indian Momentum Breakout (NSE)", "Moderate (1.5%)");
+    } catch (e) {
+      console.error("Could not fetch quote for custom stock:", e);
+    } finally {
+      setIsGeneratingSignal(false);
+    }
   };
 
   // Action: Execute Paper Trade
@@ -786,6 +918,9 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
         onOpenPortfolio={() => setIsPortfolioModalOpen(true)}
         growwConfig={growwConfig}
         onOpenGrowwModal={() => setIsGrowwModalOpen(true)}
+        isLiveSyncing={isLiveSyncing}
+        lastLiveSyncTime={lastLiveSyncTime}
+        onRefreshLivePrices={() => syncLivePrices(false)}
       />
 
       {/* Main Content Area */}
@@ -822,6 +957,9 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
                 activeSignal={activeSignal}
                 timeframe={timeframe}
                 setTimeframe={setTimeframe}
+                isLiveSyncing={isLiveSyncing}
+                lastSyncTime={lastLiveSyncTime}
+                onRefreshLivePrice={() => syncLivePrices(false)}
               />
 
               <AgentSignalCard

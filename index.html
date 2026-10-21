@@ -13,8 +13,85 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
     <script>
-      // Early theme detection to prevent flash of wrong theme (FOUC)
+      // 1. Intercept Vite HMR WebSocket in cloud preview to prevent disconnection errors
       (function() {
+        try {
+          if (typeof window !== 'undefined' && window.WebSocket) {
+            var OriginalWebSocket = window.WebSocket;
+            function ViteHmrSafeWebSocket(url, protocols) {
+              var isHmr = false;
+              if (protocols === 'vite-hmr' || (Array.isArray(protocols) && protocols.indexOf('vite-hmr') !== -1)) {
+                isHmr = true;
+              } else if (typeof url === 'string' && (url.indexOf('vite-hmr') !== -1 || url.indexOf('token=') !== -1)) {
+                isHmr = true;
+              }
+
+              if (isHmr) {
+                var target = new EventTarget();
+                var fakeWs = {
+                  url: url,
+                  readyState: 1, // WebSocket.OPEN
+                  CONNECTING: 0,
+                  OPEN: 1,
+                  CLOSING: 2,
+                  CLOSED: 3,
+                  send: function() {},
+                  close: function() {
+                    fakeWs.readyState = 3;
+                    try {
+                      target.dispatchEvent(new Event('close'));
+                    } catch (e) {}
+                  },
+                  addEventListener: function(type, listener, options) {
+                    target.addEventListener(type, listener, options);
+                  },
+                  removeEventListener: function(type, listener, options) {
+                    target.removeEventListener(type, listener, options);
+                  },
+                  dispatchEvent: function(event) {
+                    return target.dispatchEvent(event);
+                  }
+                };
+
+                ['open', 'message', 'error', 'close'].forEach(function(ev) {
+                  Object.defineProperty(fakeWs, 'on' + ev, {
+                    get: function() { return this['__on_' + ev]; },
+                    set: function(fn) {
+                      if (this['__on_' + ev]) {
+                        this.removeEventListener(ev, this['__on_' + ev]);
+                      }
+                      this['__on_' + ev] = fn;
+                      if (fn) this.addEventListener(ev, fn);
+                    }
+                  });
+                });
+
+                // Emit open event asynchronously so Vite connect() resolves without error
+                setTimeout(function() {
+                  fakeWs.readyState = 1;
+                  try {
+                    target.dispatchEvent(new Event('open'));
+                  } catch (e) {}
+                }, 0);
+
+                return fakeWs;
+              }
+
+              return new OriginalWebSocket(url, protocols);
+            }
+
+            ViteHmrSafeWebSocket.prototype = OriginalWebSocket.prototype;
+            ViteHmrSafeWebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
+            ViteHmrSafeWebSocket.OPEN = OriginalWebSocket.OPEN;
+            ViteHmrSafeWebSocket.CLOSING = OriginalWebSocket.CLOSING;
+            ViteHmrSafeWebSocket.CLOSED = OriginalWebSocket.CLOSED;
+            window.WebSocket = ViteHmrSafeWebSocket;
+          }
+        } catch (e) {
+          // Ignore if environment forbids WebSocket proxying
+        }
+
+        // 2. Early theme detection to prevent flash of wrong theme (FOUC)
         try {
           var saved = localStorage.getItem('tradesense_theme_mode');
           var isDark = true;
@@ -29,28 +106,35 @@
           document.documentElement.setAttribute('data-theme', theme);
           document.documentElement.classList.add(theme);
         } catch (e) {}
-      })();
 
-      // Gracefully ignore WebSocket / Vite HMR disconnection errors in cloud preview
-      window.addEventListener('unhandledrejection', function (event) {
-        if (
-          event.reason &&
-          (typeof event.reason.message === 'string' &&
-            (event.reason.message.includes('WebSocket') ||
-             event.reason.message.includes('vite:ws')))
-        ) {
-          event.preventDefault();
-        }
-      });
-      window.addEventListener('error', function (event) {
-        if (
-          event.message &&
-          (event.message.includes('WebSocket') ||
-           (event.filename && event.filename.includes('@vite/client')))
-        ) {
-          event.preventDefault();
-        }
-      });
+        // 3. Gracefully swallow WebSocket / Vite HMR disconnection errors
+        window.addEventListener('unhandledrejection', function (event) {
+          var reason = event.reason;
+          var msg = reason && (typeof reason.message === 'string' ? reason.message : String(reason));
+          if (
+            msg &&
+            (msg.indexOf('WebSocket') !== -1 ||
+             msg.indexOf('vite:ws') !== -1 ||
+             msg.indexOf('@vite/client') !== -1)
+          ) {
+            event.stopImmediatePropagation && event.stopImmediatePropagation();
+            event.preventDefault();
+          }
+        }, true);
+
+        window.addEventListener('error', function (event) {
+          var msg = event.message || '';
+          var fn = event.filename || '';
+          if (
+            msg.indexOf('WebSocket') !== -1 ||
+            msg.indexOf('vite') !== -1 ||
+            fn.indexOf('@vite/client') !== -1
+          ) {
+            event.stopImmediatePropagation && event.stopImmediatePropagation();
+            event.preventDefault();
+          }
+        }, true);
+      })();
     </script>
   </head>
   <body class="bg-slate-950 text-slate-100 antialiased font-sans selection:bg-cyan-500/30 selection:text-cyan-200">

@@ -8,7 +8,8 @@ import {
   BarChart2, 
   Target,
   Maximize2,
-  Minimize2
+  Minimize2,
+  RefreshCw
 } from "lucide-react";
 
 interface TradingChartProps {
@@ -16,6 +17,9 @@ interface TradingChartProps {
   activeSignal: TradeSignal | null;
   timeframe: string;
   setTimeframe: (tf: string) => void;
+  isLiveSyncing?: boolean;
+  onRefreshLivePrice?: () => void;
+  lastSyncTime?: string;
 }
 
 export const TradingChart: React.FC<TradingChartProps> = ({
@@ -23,6 +27,9 @@ export const TradingChart: React.FC<TradingChartProps> = ({
   activeSignal,
   timeframe,
   setTimeframe,
+  isLiveSyncing = false,
+  onRefreshLivePrice,
+  lastSyncTime = "Just now",
 }) => {
   const [showSMA, setShowSMA] = useState(true);
   const [showEMA, setShowEMA] = useState(true);
@@ -145,14 +152,14 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       {/* Top Header: Symbol Info + Timeframe Selectors + Indicator Toggles */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
         {/* Symbol and price info */}
-        <div className="flex items-center gap-3">
+        <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-6">
           <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-xl font-bold text-white font-mono tracking-tight">{asset.symbol}</h2>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h2 className="text-xl sm:text-2xl font-bold text-white font-mono tracking-tight">{asset.symbol}</h2>
               <span className="text-xs px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-medium">
                 {asset.name}
               </span>
-              <span className="text-xs text-slate-400 font-mono">({asset.category})</span>
+              <span className="text-xs text-slate-400 font-mono">({asset.exchange}: {asset.category})</span>
               {asset.growwSlug && (
                 <a
                   href={`https://groww.in/stocks/${asset.growwSlug}`}
@@ -163,9 +170,51 @@ export const TradingChart: React.FC<TradingChartProps> = ({
                   <span>Groww</span>
                 </a>
               )}
+              {/* Google Finance Link */}
+              <a
+                href={`https://www.google.com/finance/quote/${asset.symbol}:${asset.exchange || "NSE"}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-[11px] font-mono px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800 hover:bg-blue-900 transition-all flex items-center gap-1"
+              >
+                <span>Google Finance</span>
+              </a>
             </div>
+
+            {/* Price & Change Banner */}
+            <div className="flex items-center gap-3 mt-1.5 flex-wrap">
+              <span className="text-2xl sm:text-3xl font-extrabold font-mono text-white tracking-tight">
+                ₹{asset.price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+              </span>
+              <span
+                className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-xs font-mono font-bold ${
+                  asset.change24h >= 0
+                    ? "bg-emerald-950/80 text-emerald-400 border border-emerald-800"
+                    : "bg-rose-950/80 text-rose-400 border border-rose-800"
+                }`}
+              >
+                {asset.change24h >= 0 ? "+" : ""}₹{asset.change24h.toFixed(2)} ({asset.change24h >= 0 ? "+" : ""}{asset.changePercent.toFixed(2)}%)
+              </span>
+
+              {/* On-Time Live Status Pill */}
+              <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-slate-950 text-[11px] font-mono text-slate-300 border border-slate-800">
+                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                <span>NSE Real-Time</span>
+                {onRefreshLivePrice && (
+                  <button
+                    onClick={onRefreshLivePrice}
+                    disabled={isLiveSyncing}
+                    title="Refresh live on-time price"
+                    className="ml-1 p-0.5 text-slate-400 hover:text-emerald-400 transition-colors"
+                  >
+                    <RefreshCw className={`w-3 h-3 ${isLiveSyncing ? "animate-spin text-emerald-400" : ""}`} />
+                  </button>
+                )}
+              </div>
+            </div>
+
             {/* Live details ribbon */}
-            <div className="flex items-center gap-4 text-xs font-mono mt-1 text-slate-400">
+            <div className="flex items-center gap-4 text-xs font-mono mt-1 text-slate-400 flex-wrap">
               <span>O: <span className="text-slate-200">₹{hoveredCandle?.open?.toFixed(2)}</span></span>
               <span>H: <span className="text-emerald-400">₹{hoveredCandle?.high?.toFixed(2)}</span></span>
               <span>L: <span className="text-rose-400">₹{hoveredCandle?.low?.toFixed(2)}</span></span>

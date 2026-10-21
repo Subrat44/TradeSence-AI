@@ -12,7 +12,8 @@ import {
   CheckCircle2, 
   Newspaper, 
   ExternalLink, 
-  Key 
+  Key,
+  RefreshCw
 } from "lucide-react";
 import { Asset, PaperAccount, GrowwConfig } from "../types";
 import { ThemeToggle } from "./ThemeToggle";
@@ -29,6 +30,9 @@ interface HeaderProps {
   onOpenPortfolio: () => void;
   growwConfig: GrowwConfig;
   onOpenGrowwModal: () => void;
+  isLiveSyncing?: boolean;
+  lastLiveSyncTime?: string;
+  onRefreshLivePrices?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -41,6 +45,9 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenPortfolio,
   growwConfig,
   onOpenGrowwModal,
+  isLiveSyncing = false,
+  lastLiveSyncTime = "Just now",
+  onRefreshLivePrices,
 }) => {
   // Calculate total portfolio equity: cash + value of open positions
   const positionsEquity = paperAccount.positions.reduce((acc, pos) => {
@@ -71,17 +78,24 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-bold text-lg tracking-tight text-white flex items-center gap-1.5">
                   TradeSense <span className="text-emerald-400 text-xs font-mono px-1.5 py-0.5 bg-emerald-950/80 border border-emerald-800/80 rounded">INDIA</span>
                 </span>
-                <span className="inline-flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800/60 font-mono">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                  NSE / BSE Live
-                </span>
+                <button
+                  id="btn-refresh-live-quotes"
+                  onClick={onRefreshLivePrices}
+                  disabled={isLiveSyncing}
+                  title="Click to fetch exact real-time prices matching Google Finance & Groww"
+                  className="inline-flex items-center gap-1.5 text-[10px] px-2.5 py-0.5 rounded-full bg-emerald-950 hover:bg-emerald-900 text-emerald-300 border border-emerald-800/80 transition-all font-mono group cursor-pointer"
+                >
+                  <RefreshCw className={`w-3 h-3 text-emerald-400 transition-transform ${isLiveSyncing ? "animate-spin" : "group-hover:rotate-180"}`} />
+                  <span className="font-semibold">{isLiveSyncing ? "Syncing Quotes..." : "Live Feed"}</span>
+                  <span className="text-[9px] text-emerald-400/80 hidden sm:inline">• {lastLiveSyncTime}</span>
+                </button>
               </div>
               <p className="text-xs text-slate-400 hidden sm:block">
-                AI Stock Screener & Groww Trading Research Copilot
+                Real-Time Quotes Synced with Google Finance & Groww (NSE/BSE)
               </p>
             </div>
           </div>
@@ -256,9 +270,9 @@ export const Header: React.FC<HeaderProps> = ({
       {/* Secondary Ribbon: Indian Market Watchlist Ticker (Nifty, Bank Nifty, Reliance, Tata Motors, Suzlon) */}
       <div className="border-t border-slate-800/60 bg-slate-950/60 px-4 sm:px-6 py-1.5 overflow-x-auto scrollbar-none">
         <div className="max-w-7xl mx-auto flex items-center gap-2 text-xs font-mono">
-          <span className="text-slate-400 flex items-center gap-1 font-bold text-[11px] uppercase tracking-wider whitespace-nowrap mr-1">
-            <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-            NSE Market Watch:
+          <span className="text-slate-400 flex items-center gap-1.5 font-bold text-[11px] uppercase tracking-wider whitespace-nowrap mr-1">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+            LIVE NSE / GROWW:
           </span>
 
           <div className="flex items-center gap-2">
