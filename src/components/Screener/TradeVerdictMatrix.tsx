@@ -13,7 +13,9 @@ import {
   Sparkles,
   ArrowUpRight,
   HelpCircle,
-  Eye
+  Eye,
+  X,
+  ArrowLeft
 } from "lucide-react";
 
 interface TradeVerdictMatrixProps {
@@ -23,6 +25,8 @@ interface TradeVerdictMatrixProps {
   onOpenResearch: (asset: Asset) => void;
   onAnalyzeCustomStock: (symbol: string) => void;
   isAnalyzing: boolean;
+  searchQuery?: string;
+  onSearchQueryChange?: (q: string) => void;
 }
 
 export const TradeVerdictMatrix: React.FC<TradeVerdictMatrixProps> = ({
@@ -32,11 +36,22 @@ export const TradeVerdictMatrix: React.FC<TradeVerdictMatrixProps> = ({
   onOpenResearch,
   onAnalyzeCustomStock,
   isAnalyzing,
+  searchQuery: externalSearchQuery,
+  onSearchQueryChange,
 }) => {
   const [verdictFilter, setVerdictFilter] = useState<string>("ALL");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
-  const [searchQuery, setSearchQuery] = useState<string>("");
+  const [internalSearchQuery, setInternalSearchQuery] = useState<string>("");
   const [customTickerInput, setCustomTickerInput] = useState<string>("");
+
+  const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : internalSearchQuery;
+  const setSearchQuery = (val: string) => {
+    if (onSearchQueryChange) {
+      onSearchQueryChange(val);
+    } else {
+      setInternalSearchQuery(val);
+    }
+  };
 
   const filteredAssets = assets.filter((asset) => {
     // Search query
@@ -231,15 +246,44 @@ export const TradeVerdictMatrix: React.FC<TradeVerdictMatrixProps> = ({
         </div>
 
         {/* Search input */}
-        <div className="relative w-full sm:w-64">
-          <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search stock, sector..."
-            className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-3 py-1.5 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
-          />
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          {searchQuery.trim() !== "" && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              className="px-2.5 py-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 border border-slate-800 text-xs font-mono text-cyan-400 hover:text-cyan-300 flex items-center gap-1 whitespace-nowrap transition-all cursor-pointer"
+              title="Clear search and return to all stocks"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>All Stocks</span>
+            </button>
+          )}
+          <div className="relative w-full sm:w-64">
+            <Search className="w-3.5 h-3.5 text-slate-500 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && searchQuery.trim() && filteredAssets.length === 0) {
+                  e.preventDefault();
+                  onAnalyzeCustomStock(searchQuery.trim().toUpperCase());
+                }
+              }}
+              placeholder="Search stock, sector..."
+              className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-8 pr-8 py-1.5 text-xs font-mono text-white placeholder-slate-500 focus:outline-none focus:border-cyan-500"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                title="Clear search"
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -397,6 +441,44 @@ export const TradeVerdictMatrix: React.FC<TradeVerdictMatrixProps> = ({
           );
         })}
       </div>
+
+      {/* Empty Search / Filter State */}
+      {filteredAssets.length === 0 && (
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-8 text-center flex flex-col items-center justify-center gap-3 shadow-xl">
+          <Search className="w-8 h-8 text-cyan-400/80" />
+          <h3 className="text-base font-mono font-bold text-white">
+            No pre-loaded stocks matched "{searchQuery || verdictFilter}"
+          </h3>
+          <p className="text-xs text-slate-400 max-w-md">
+            You can fetch the live NSE/BSE quote and AI trade setup for <span className="text-white font-mono font-bold">{searchQuery.trim().toUpperCase() || "any symbol"}</span> directly, or return to the full stock screener list.
+          </p>
+          <div className="flex flex-wrap items-center justify-center gap-3 mt-2">
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery("");
+                setVerdictFilter("ALL");
+                setCategoryFilter("ALL");
+              }}
+              className="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-mono font-bold text-slate-200 flex items-center gap-1.5 transition-all cursor-pointer"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to All Screener Stocks</span>
+            </button>
+            {searchQuery.trim() !== "" && (
+              <button
+                type="button"
+                disabled={isAnalyzing}
+                onClick={() => onAnalyzeCustomStock(searchQuery.trim().toUpperCase())}
+                className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-mono font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer disabled:opacity-50"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>{isAnalyzing ? "Scanning Live NSE..." : `Analyze "${searchQuery.trim().toUpperCase()}" Live`}</span>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

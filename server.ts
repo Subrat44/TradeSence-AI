@@ -1258,14 +1258,26 @@ app.get("/api/groww/orders", (req, res) => {
 
 // Vite middleware & Static serving
 async function startServer() {
-  const isProd = process.env.NODE_ENV === "production";
+  const isDev = process.env.NODE_ENV === "development" || (!process.env.NODE_ENV && process.env.npm_lifecycle_event === "dev");
   const distPath = path.join(process.cwd(), "dist");
   const indexPath = path.join(distPath, "index.html");
 
-  if (isProd && fs.existsSync(indexPath)) {
+  if (!isDev && fs.existsSync(indexPath)) {
     console.log("Serving static production assets from:", distPath);
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
+    app.use(express.static(distPath, {
+      setHeaders: (res, filePath) => {
+        if (filePath.endsWith("index.html")) {
+          res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+          res.setHeader("Pragma", "no-cache");
+          res.setHeader("Expires", "0");
+        }
+      },
+    }));
+    app.get("*", (req, res, next) => {
+      if (req.path.startsWith("/api/")) return next();
+      res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
       res.sendFile(indexPath);
     });
   } else {
@@ -1290,7 +1302,12 @@ async function startServer() {
         const templatePath = path.resolve(process.cwd(), "index.html");
         let template = fs.readFileSync(templatePath, "utf-8");
         template = await vite.transformIndexHtml(url, template);
-        res.status(200).set({ "Content-Type": "text/html" }).end(template);
+        res.status(200).set({ 
+          "Content-Type": "text/html",
+          "Cache-Control": "no-cache, no-store, must-revalidate",
+          "Pragma": "no-cache",
+          "Expires": "0"
+        }).end(template);
       } catch (e) {
         next(e);
       }

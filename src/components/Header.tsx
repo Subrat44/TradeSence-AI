@@ -72,16 +72,26 @@ export const Header: React.FC<HeaderProps> = ({
           <ThemeToggle className="mr-1" />
 
           <div className="flex items-center gap-2.5">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-cyan-500 p-0.5 shadow-lg shadow-emerald-500/20">
+            <button
+              type="button"
+              onClick={() => setActiveTab("screener")}
+              title="Return to TradeSense Home (AI Stock Screener)"
+              className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-600 via-teal-600 to-cyan-500 p-0.5 shadow-lg shadow-emerald-500/20 cursor-pointer hover:scale-105 transition-transform"
+            >
               <div className="w-full h-full bg-slate-950 rounded-[10px] flex items-center justify-center">
                 <Bot className="w-5 h-5 text-emerald-400" />
               </div>
-            </div>
+            </button>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-bold text-lg tracking-tight text-white flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("screener")}
+                  title="Return to TradeSense Home (AI Stock Screener)"
+                  className="font-bold text-lg tracking-tight text-white flex items-center gap-1.5 hover:text-emerald-300 transition-colors cursor-pointer"
+                >
                   TradeSense <span className="text-emerald-400 text-xs font-mono px-1.5 py-0.5 bg-emerald-950/80 border border-emerald-800/80 rounded">INDIA</span>
-                </span>
+                </button>
                 <button
                   id="btn-refresh-live-quotes"
                   onClick={onRefreshLivePrices}

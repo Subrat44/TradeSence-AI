@@ -35,13 +35,66 @@ import {
   Layers,
   ShieldCheck,
   ExternalLink,
-  Briefcase
+  Briefcase,
+  ArrowLeft,
+  Home,
+  ChevronRight
 } from "lucide-react";
+
+const VALID_TABS: TabType[] = ["screener", "terminal", "news", "research", "backtest", "portfolio"];
+
+const TAB_LABELS: Record<TabType, string> = {
+  screener: "AI Stock Screener",
+  terminal: "Trading Terminal",
+  news: "News & Events",
+  research: "Deep Research",
+  backtest: "Strategy Lab",
+  portfolio: "Groww Paper Portfolio",
+};
+
+interface NavHistoryEntry {
+  tab: TabType;
+  symbol: string;
+  q: string;
+}
 
 export default function App() {
   const [assets, setAssets] = useState<Asset[]>(INITIAL_ASSETS);
-  const [selectedAsset, setSelectedAsset] = useState<Asset>(INITIAL_ASSETS[0]);
-  const [activeTab, setActiveTab] = useState<TabType>("screener");
+  const [selectedAsset, setSelectedAsset] = useState<Asset>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const sym = params.get("symbol")?.toUpperCase().trim();
+      if (sym) {
+        const found = INITIAL_ASSETS.find((a) => a.symbol.toUpperCase() === sym);
+        if (found) return found;
+      }
+    }
+    return INITIAL_ASSETS[0];
+  });
+  const [activeTab, setActiveTab] = useState<TabType>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get("tab") as TabType | null;
+      if (tabParam && VALID_TABS.includes(tabParam)) {
+        return tabParam;
+      }
+    }
+    return "screener";
+  });
+  const [screenerSearchQuery, setScreenerSearchQuery] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("q") || "";
+    }
+    return "";
+  });
+  const [committedSearchQuery, setCommittedSearchQuery] = useState<string>(() => {
+    if (typeof window !== "undefined") {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("q") || "";
+    }
+    return "";
+  });
   const [timeframe, setTimeframe] = useState<string>("1M");
 
   // Real-Time Live Feed State (Synced with Google Finance & Groww)
@@ -98,16 +151,16 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
         {
           id: "pos-sample-tatamotors",
           symbol: "TATAMOTORS",
-          assetName: "Tata Motors Ltd",
+          assetName: "Tata Motors Passenger Vehicles Ltd",
           side: "BUY",
-          entryPrice: 715.00,
-          currentPrice: 735.40,
-          shares: 80,
-          stopLoss: 690.00,
-          takeProfit: 810.00,
+          entryPrice: 265.00,
+          currentPrice: 272.55,
+          shares: 200,
+          stopLoss: 254.00,
+          takeProfit: 310.00,
           timestamp: new Date(Date.now() - 3600 * 1000 * 24).toISOString(),
-          pnl: (735.40 - 715.00) * 80,
-          pnlPercent: ((735.40 - 715.00) / 715.00) * 100,
+          pnl: (272.55 - 265.00) * 200,
+          pnlPercent: ((272.55 - 265.00) / 265.00) * 100,
           orderType: "Delivery (CNC)",
           growwSlug: "tata-motors-ltd",
         },
@@ -117,9 +170,9 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
           id: "hist-sample-1",
           symbol: "SUZLON",
           side: "BUY",
-          price: 78.50,
-          shares: 500,
-          pnl: 4850.00,
+          price: 36.50,
+          shares: 1000,
+          pnl: 2550.00,
           timestamp: new Date(Date.now() - 3600 * 1000 * 72).toISOString(),
           status: "CLOSED",
         },
@@ -229,6 +282,210 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
   useEffect(() => {
     assetsRef.current = assets;
   }, [assets]);
+
+  // Debounce screenerSearchQuery into committedSearchQuery so typing a stock query pushes a clean history entry
+  useEffect(() => {
+    const trimmed = screenerSearchQuery.trim();
+    if (trimmed === "") {
+      setCommittedSearchQuery("");
+      return;
+    }
+    const timer = setTimeout(() => {
+      setCommittedSearchQuery(trimmed);
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [screenerSearchQuery]);
+
+  // Browser History API Synchronization (Prevents Back button from exiting to browser home page)
+  const [historyStack, setHistoryStack] = useState<NavHistoryEntry[]>(() => {
+    const baseEntry: NavHistoryEntry = {
+      tab: "screener",
+      symbol: INITIAL_ASSETS[0].symbol,
+      q: "",
+    };
+    return [baseEntry];
+  });
+  const historyStackRef = useRef<NavHistoryEntry[]>(historyStack);
+  useEffect(() => {
+    historyStackRef.current = historyStack;
+  }, [historyStack]);
+
+  const isRestoringHistoryRef = useRef<boolean>(false);
+  const hasInitializedHistoryRef = useRef<boolean>(false);
+
+  const buildHistoryUrl = useCallback((tab: TabType, symbol: string, q: string) => {
+    if (typeof window === "undefined") return "/";
+    const isDefaultHome =
+      tab === "screener" &&
+      symbol.toUpperCase() === INITIAL_ASSETS[0].symbol.toUpperCase() &&
+      !q;
+    if (isDefaultHome) {
+      return window.location.pathname;
+    }
+    const params = new URLSearchParams();
+    params.set("tab", tab);
+    params.set("symbol", symbol);
+    if (q) params.set("q", q);
+    return `${window.location.pathname}?${params.toString()}`;
+  }, []);
+
+  // Seed initial root history entry and listen to browser Back / Forward (popstate)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const rootEntry: NavHistoryEntry = {
+      tab: "screener",
+      symbol: INITIAL_ASSETS[0].symbol,
+      q: "",
+    };
+
+    const currentEntry: NavHistoryEntry = {
+      tab: activeTab,
+      symbol: selectedAsset.symbol,
+      q: committedSearchQuery,
+    };
+
+    const isDeepLinked =
+      currentEntry.tab !== rootEntry.tab ||
+      currentEntry.symbol !== rootEntry.symbol ||
+      currentEntry.q !== rootEntry.q;
+
+    // Anchor root home state first so pressing Back never jumps out to browser Home page
+    window.history.replaceState(
+      { isTradeSenseHistory: true, ...rootEntry, stepIndex: 0 },
+      "",
+      buildHistoryUrl(rootEntry.tab, rootEntry.symbol, rootEntry.q)
+    );
+
+    if (isDeepLinked) {
+      window.history.pushState(
+        { isTradeSenseHistory: true, ...currentEntry, stepIndex: 1 },
+        "",
+        buildHistoryUrl(currentEntry.tab, currentEntry.symbol, currentEntry.q)
+      );
+      setHistoryStack([rootEntry, currentEntry]);
+    } else {
+      setHistoryStack([rootEntry]);
+    }
+
+    hasInitializedHistoryRef.current = true;
+
+    const handlePopState = (event: PopStateEvent) => {
+      // Close any open modal first on back navigation
+      setIsPortfolioModalOpen(false);
+      setIsGrowwModalOpen(false);
+
+      let targetTab: TabType = "screener";
+      let targetSymbol: string = INITIAL_ASSETS[0].symbol;
+      let targetQ: string = "";
+
+      if (event.state && event.state.isTradeSenseHistory) {
+        if (VALID_TABS.includes(event.state.tab)) {
+          targetTab = event.state.tab;
+        }
+        if (typeof event.state.symbol === "string" && event.state.symbol) {
+          targetSymbol = event.state.symbol;
+        }
+        if (typeof event.state.q === "string") {
+          targetQ = event.state.q;
+        }
+      } else {
+        const params = new URLSearchParams(window.location.search);
+        const tabParam = params.get("tab") as TabType | null;
+        if (tabParam && VALID_TABS.includes(tabParam)) {
+          targetTab = tabParam;
+        }
+        const symParam = params.get("symbol");
+        if (symParam) {
+          targetSymbol = symParam.toUpperCase().trim();
+        }
+        targetQ = params.get("q") || "";
+      }
+
+      isRestoringHistoryRef.current = true;
+      setActiveTab(targetTab);
+      setScreenerSearchQuery(targetQ);
+      setCommittedSearchQuery(targetQ);
+
+      const matchedAsset =
+        assetsRef.current.find((a) => a.symbol.toUpperCase() === targetSymbol.toUpperCase()) ||
+        INITIAL_ASSETS.find((a) => a.symbol.toUpperCase() === targetSymbol.toUpperCase()) ||
+        INITIAL_ASSETS[0];
+      setSelectedAsset(matchedAsset);
+
+      setHistoryStack((prev) => {
+        if (prev.length <= 1) {
+          return [{ tab: targetTab, symbol: matchedAsset.symbol, q: targetQ }];
+        }
+        return prev.slice(0, -1);
+      });
+    };
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, []);
+
+  // Push new browser history state whenever activeTab, selectedAsset.symbol, or committedSearchQuery changes
+  useEffect(() => {
+    if (typeof window === "undefined" || !hasInitializedHistoryRef.current) return;
+
+    if (isRestoringHistoryRef.current) {
+      isRestoringHistoryRef.current = false;
+      return;
+    }
+
+    const stack = historyStackRef.current;
+    const top = stack[stack.length - 1];
+    const nextEntry: NavHistoryEntry = {
+      tab: activeTab,
+      symbol: selectedAsset.symbol,
+      q: activeTab === "screener" ? committedSearchQuery : "",
+    };
+
+    if (
+      top &&
+      top.tab === nextEntry.tab &&
+      top.symbol.toUpperCase() === nextEntry.symbol.toUpperCase() &&
+      top.q === nextEntry.q
+    ) {
+      return;
+    }
+
+    const nextStepIndex = stack.length;
+    const nextUrl = buildHistoryUrl(nextEntry.tab, nextEntry.symbol, nextEntry.q);
+
+    window.history.pushState(
+      { isTradeSenseHistory: true, ...nextEntry, stepIndex: nextStepIndex },
+      "",
+      nextUrl
+    );
+    setHistoryStack((prev) => [...prev, nextEntry]);
+  }, [activeTab, selectedAsset.symbol, committedSearchQuery, buildHistoryUrl]);
+
+  // Action: Navigate Back (In-App Back button or fallback to Screener Home)
+  const handleNavigateBack = useCallback(() => {
+    if (isPortfolioModalOpen || isGrowwModalOpen) {
+      setIsPortfolioModalOpen(false);
+      setIsGrowwModalOpen(false);
+      return;
+    }
+    if (typeof window !== "undefined" && historyStackRef.current.length > 1) {
+      window.history.back();
+    } else {
+      setScreenerSearchQuery("");
+      setCommittedSearchQuery("");
+      setActiveTab("screener");
+    }
+  }, [isPortfolioModalOpen, isGrowwModalOpen]);
+
+  // Action: Return directly to Application Home Page (Screener)
+  const handleNavigateHome = useCallback(() => {
+    setIsPortfolioModalOpen(false);
+    setIsGrowwModalOpen(false);
+    setScreenerSearchQuery("");
+    setCommittedSearchQuery("");
+    setActiveTab("screener");
+  }, []);
 
   const selectedAssetRef = useRef(selectedAsset);
   useEffect(() => {
@@ -938,7 +1195,13 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
       {/* Header */}
       <Header
         activeTab={activeTab}
-        setActiveTab={setActiveTab}
+        setActiveTab={(tab) => {
+          if (tab === "screener" && activeTab === "screener" && screenerSearchQuery) {
+            setScreenerSearchQuery("");
+            setCommittedSearchQuery("");
+          }
+          setActiveTab(tab);
+        }}
         selectedAsset={selectedAsset}
         onSelectAsset={(asset) => {
           setSelectedAsset(asset);
@@ -956,6 +1219,70 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
         onRefreshLivePrices={() => syncLivePrices(false)}
       />
 
+      {/* Contextual Navigation & Back Bar (Prevents confusion and provides 1-click Back/Home navigation) */}
+      {(activeTab !== "screener" || screenerSearchQuery.trim() !== "" || historyStack.length > 1) && (
+        <div className="border-b border-slate-800/80 bg-slate-900/90 backdrop-blur-sm">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 flex flex-wrap items-center justify-between gap-2 text-xs font-mono">
+            <div className="flex items-center gap-2">
+              <button
+                id="btn-app-navigate-back"
+                type="button"
+                onClick={handleNavigateBack}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-950 hover:bg-slate-800 text-emerald-400 hover:text-emerald-300 border border-slate-800 hover:border-emerald-700/70 transition-all font-bold cursor-pointer shadow-sm"
+                title="Go back to previous stock or tab (Browser Back supported)"
+              >
+                <ArrowLeft className="w-3.5 h-3.5" />
+                <span>
+                  {historyStack.length > 1
+                    ? `Back to ${
+                        historyStack[historyStack.length - 2].tab === "screener" &&
+                        !historyStack[historyStack.length - 2].q
+                          ? "Screener Home"
+                          : `${historyStack[historyStack.length - 2].symbol} • ${
+                              TAB_LABELS[historyStack[historyStack.length - 2].tab]
+                            }`
+                      }`
+                    : "Back to Screener Home"}
+                </span>
+              </button>
+
+              {(activeTab !== "screener" || screenerSearchQuery.trim() !== "") && (
+                <button
+                  id="btn-app-navigate-home"
+                  type="button"
+                  onClick={handleNavigateHome}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-950/70 hover:bg-slate-800 text-slate-300 hover:text-white border border-slate-800 transition-all cursor-pointer"
+                  title="Return directly to TradeSense AI Home Page (Stock Screener)"
+                >
+                  <Home className="w-3.5 h-3.5 text-cyan-400" />
+                  <span className="hidden sm:inline">Screener Home</span>
+                </button>
+              )}
+            </div>
+
+            {/* Breadcrumb Trail with Live Tabular Price */}
+            <div className="flex items-center gap-1.5 text-slate-400 tabular-nums overflow-x-auto">
+              <button
+                type="button"
+                onClick={handleNavigateHome}
+                className="hover:text-emerald-400 transition-colors cursor-pointer"
+              >
+                TradeSense Home
+              </button>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+              <span className="text-slate-200 font-semibold">{TAB_LABELS[activeTab]}</span>
+              <ChevronRight className="w-3.5 h-3.5 text-slate-600 flex-shrink-0" />
+              <span className="px-2 py-0.5 rounded bg-slate-950 border border-slate-800 text-white font-bold flex items-center gap-1.5">
+                <span>{selectedAsset.symbol}</span>
+                <span className="text-emerald-400">
+                  ₹{selectedAsset.price.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                </span>
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Main Content Area */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6">
         {/* Tab 0: AI Stock Screener (Trade or Avoid? Matrix) */}
@@ -963,6 +1290,8 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
           <TradeVerdictMatrix
             assets={assets}
             selectedAsset={selectedAsset}
+            searchQuery={screenerSearchQuery}
+            onSearchQueryChange={setScreenerSearchQuery}
             onSelectAsset={(asset) => {
               setSelectedAsset(asset);
               setActiveTab("terminal");
