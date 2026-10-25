@@ -22,7 +22,9 @@ import {
   AgentPersona,
   MarketNewsItem,
   GrowwConfig,
-  GrowwOrder 
+  GrowwOrder,
+  CustomTradeSetup,
+  TradeDirection
 } from "./types";
 import { 
   Bot, 
@@ -108,6 +110,45 @@ export default function App() {
   // Signals per symbol cache
   const [signalsMap, setSignalsMap] = useState<Record<string, TradeSignal>>({});
   const [isGeneratingSignal, setIsGeneratingSignal] = useState(false);
+
+  // User Custom Trade & Budget Setup per symbol (starts blank — no forced default price or high-budget lot)
+  const createDefaultCustomSetup = (): CustomTradeSetup => ({
+    direction: "BULLISH",
+    customPrice: "",
+    customBudget: "",
+    customShares: "",
+    customStopLoss: "",
+    customTarget1: "",
+    customTarget2: "",
+    orderType: "Delivery (CNC)",
+  });
+  const [customSetupsMap, setCustomSetupsMap] = useState<Record<string, CustomTradeSetup>>({});
+
+  const activeCustomSetup: CustomTradeSetup =
+    customSetupsMap[selectedAsset.symbol] || createDefaultCustomSetup();
+
+  const handleUpdateCustomSetup = useCallback(
+    (updates: Partial<CustomTradeSetup>) => {
+      setCustomSetupsMap((prev) => {
+        const current = prev[selectedAsset.symbol] || createDefaultCustomSetup();
+        return {
+          ...prev,
+          [selectedAsset.symbol]: {
+            ...current,
+            ...updates,
+          },
+        };
+      });
+    },
+    [selectedAsset.symbol]
+  );
+
+  const handleResetCustomSetup = useCallback(() => {
+    setCustomSetupsMap((prev) => ({
+      ...prev,
+      [selectedAsset.symbol]: createDefaultCustomSetup(),
+    }));
+  }, [selectedAsset.symbol]);
 
   // Research reports cache
   const [reportsMap, setReportsMap] = useState<Record<string, ResearchReport>>({});
@@ -678,10 +719,32 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
     });
   }, [assets]);
 
-  // Action: Generate AI Trading Signal
-  const handleGenerateSignal = async (persona: AgentPersona, risk: string) => {
+  // Action: Generate AI Trading Signal (Supports both Bullish BUY & Bearish SHORT/SELL + Custom Price & Budget)
+  const handleGenerateSignal = async (
+    persona: AgentPersona,
+    risk: string,
+    options?: {
+      direction?: TradeDirection;
+      customPrice?: number;
+      customBudget?: number;
+    }
+  ) => {
     setIsGeneratingSignal(true);
     const latestCandle = selectedAsset.history[selectedAsset.history.length - 1];
+    const setupForSymbol = customSetupsMap[selectedAsset.symbol] || createDefaultCustomSetup();
+    const tradeDirection: TradeDirection = options?.direction || setupForSymbol.direction || "BULLISH";
+    const isBearish = tradeDirection === "BEARISH";
+    const customEntryPrice =
+      options?.customPrice ??
+      (Number(setupForSymbol.customPrice) > 0 ? Number(setupForSymbol.customPrice) : undefined);
+    const customBudget =
+      options?.customBudget ??
+      (Number(setupForSymbol.customBudget) > 0 ? Number(setupForSymbol.customBudget) : undefined);
+
+    const effectivePrice = customEntryPrice && customEntryPrice > 0 ? customEntryPrice : selectedAsset.price;
+    const effectiveBudget =
+      customBudget && customBudget > 0 ? customBudget : Math.min(paperAccount.cash, 10000);
+
     try {
       const res = await fetch("/api/agent/analyze-trade", {
         method: "POST",
@@ -689,6 +752,9 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
         body: JSON.stringify({
           ticker: selectedAsset.symbol,
           currentPrice: selectedAsset.price,
+          customEntryPrice,
+          customBudget: effectiveBudget,
+          tradeDirection,
           category: selectedAsset.category,
           technicals: {
             rsi: latestCandle?.rsi,
@@ -715,30 +781,48 @@ Ask me anything about today's market setup or click **"Evaluate Trade Setup"** t
       }
     } catch (err: any) {
       console.error("Failed to generate trade signal:", err);
-      // Fallback signal if API key not present or error
-      const price = selectedAsset.price;
-      const isTrade = selectedAsset.verdict !== "AVOID (HIGH RISK)";
-      const fallbackSignal: TradeSignal = {
-        verdict: isTrade ? "TRADE (HIGH CONVICTION)" : "AVOID (HIGH RISK)",
-        action: isTrade ? "BUY" : "AVOID",
-        confidence: isTrade ? 84 : 35,
-        timeframe: "BTST / Swing (2-10 days)",
-        orderType: "Delivery (CNC)",
-        entryZone: { min: Number((price * 0.992).toFixed(2)), max: Number((price * 1.006).toFixed(2)) },
-        stopLoss: Number((price * (isTrade ? 0.962 : 1.04)).toFixed(2)),
-        takeProfit1: Number((price * (isTrade ? 1.058 : 0.94)).toFixed(2)),
-        takeProfit2: Number((price * (isTrade ? 1.115 : 0.88)).toFixed(2)),
-        riskRewardRatio: "1:2.7",
-        suggestedShares: Math.max(1, Math.floor((paperAccount.cash * 0.015) / Math.max(1, price * 0.038))),
-        positionValue: Math.round(price * Math.max(1, Math.floor((paperAccount.cash * 0.015) / Math.max(1, price * 0.038)))),
-        primaryReason: `${persona} setup identified: Positive price action along the 20-day SMA on NSE with RSI at ${latestCandle?.rsi || 55}. Clean volume delivery structure.`,
-        whyTradeOrAvoid: isTrade 
-          ? `TRADE THIS: Favorable risk/reward on Groww with 3.8% stop loss and clear institutional participation.`
-          : `AVOID THIS: Unfavorable valuation or high promoter pledge risk. Wait for consolidation before entering.`,
-        technicalSignals: ["RSI momentum confirmed", "Above 20-day SMA support", "Volume expansion on NSE"],
-        invalidationCriteria: `Daily close beyond ₹${(price * (isTrade ? 0.962 : 1.04)).toFixed(2)} on NSE`,
-        growwUrl: selectedAsset.growwSlug ? `https://groww.in/stocks/${selectedAsset.growwSlug}` : undefined,
-      };
+      const price = effectivePrice;
+      const budgetShares = Math.max(1, Math.floor(effectiveBudget / Math.max(1, price)));
+      const fallbackSignal: TradeSignal = isBearish
+        ? {
+            verdict: "TRADE (HIGH CONVICTION)",
+            action: "SHORT",
+            confidence: 84,
+            timeframe: "Intraday (MIS) / Short Swing",
+            orderType: "Intraday (MIS)",
+            entryZone: { min: Number((price * 0.996).toFixed(2)), max: Number((price * 1.004).toFixed(2)) },
+            stopLoss: Number((price * 1.035).toFixed(2)),
+            takeProfit1: Number((price * 0.945).toFixed(2)),
+            takeProfit2: Number((price * 0.895).toFixed(2)),
+            riskRewardRatio: "1:2.6",
+            suggestedShares: budgetShares,
+            positionValue: Math.round(price * budgetShares),
+            primaryReason: `Bearish Down-Market (${persona}) setup: Price rejection near resistance with downside targets at ₹${(price * 0.945).toFixed(2)} and protective Stop-Loss above ₹${(price * 1.035).toFixed(2)}.`,
+            whyTradeOrAvoid: `BEARISH SHORT SETUP: Sized to ₹${effectiveBudget.toLocaleString("en-IN")} budget (${budgetShares} shares) with Stop-Loss at ₹${(price * 1.035).toFixed(2)} and downside Target 1 at ₹${(price * 0.945).toFixed(2)}.`,
+            technicalSignals: ["Bearish resistance rejection", "Downside momentum target active", "Protective Stop-Loss above entry"],
+            invalidationCriteria: `Close above Stop-Loss at ₹${(price * 1.035).toFixed(2)} on NSE`,
+            growwUrl: selectedAsset.growwSlug ? `https://groww.in/stocks/${selectedAsset.growwSlug}` : undefined,
+          }
+        : {
+            verdict: "TRADE (HIGH CONVICTION)",
+            action: "BUY",
+            confidence: 85,
+            timeframe: "BTST / Swing (2-10 days)",
+            orderType: "Delivery (CNC)",
+            entryZone: { min: Number((price * 0.994).toFixed(2)), max: Number((price * 1.006).toFixed(2)) },
+            stopLoss: Number((price * 0.962).toFixed(2)),
+            takeProfit1: Number((price * 1.058).toFixed(2)),
+            takeProfit2: Number((price * 1.115).toFixed(2)),
+            riskRewardRatio: "1:2.7",
+            suggestedShares: budgetShares,
+            positionValue: Math.round(price * budgetShares),
+            primaryReason: `Bullish Upper-Side (${persona}) setup: Positive price action along the 20-day SMA on NSE with RSI at ${latestCandle?.rsi || 55}.`,
+            whyTradeOrAvoid: `BULLISH BUY SETUP: Sized to ₹${effectiveBudget.toLocaleString("en-IN")} budget (${budgetShares} shares) with Stop-Loss at ₹${(price * 0.962).toFixed(2)} and Target 1 at ₹${(price * 1.058).toFixed(2)}.`,
+            technicalSignals: ["RSI momentum confirmed", "Above 20-day SMA support", "Volume expansion on NSE"],
+            invalidationCriteria: `Daily close below Stop-Loss at ₹${(price * 0.962).toFixed(2)} on NSE`,
+            growwUrl: selectedAsset.growwSlug ? `https://groww.in/stocks/${selectedAsset.growwSlug}` : undefined,
+          };
+
       setSignalsMap((prev) => ({
         ...prev,
         [selectedAsset.symbol]: fallbackSignal,
@@ -920,9 +1004,6 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
     if (existing) {
       setSelectedAsset(existing);
       setActiveTab("terminal");
-      if (!signalsMap[existing.symbol]) {
-        handleGenerateSignal("Indian Momentum Breakout (NSE)", "Moderate (1.5%)");
-      }
       return;
     }
 
@@ -975,7 +1056,6 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
       setAssets((prev) => [newAsset, ...prev]);
       setSelectedAsset(newAsset);
       setActiveTab("terminal");
-      handleGenerateSignal("Indian Momentum Breakout (NSE)", "Moderate (1.5%)");
     } catch (e) {
       console.error("Could not fetch quote for custom stock:", e);
     } finally {
@@ -983,25 +1063,32 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
     }
   };
 
-  // Action: Execute Paper Trade
-  const handleExecuteTrade = (posData: Omit<PaperPosition, "id" | "timestamp" | "pnl" | "pnlPercent">) => {
-    const cost = posData.shares * posData.entryPrice;
-    if (cost > paperAccount.cash) {
-      alert("Insufficient paper cash balance for this order size.");
-      return;
+  // Action: Execute Paper Trade (Supports both Bullish BUY and Bearish SHORT + Intraday MIS leverage)
+  const handleExecuteTrade = (posData: Omit<PaperPosition, "id" | "timestamp" | "pnl" | "pnlPercent">): boolean => {
+    const leverage = posData.orderType === "Intraday (MIS)" ? 5 : 1;
+    const requiredMargin = (posData.shares * posData.entryPrice) / leverage;
+    if (requiredMargin > paperAccount.cash) {
+      return false;
     }
+
+    const initialDiff =
+      posData.side === "BUY"
+        ? posData.currentPrice - posData.entryPrice
+        : posData.entryPrice - posData.currentPrice;
+    const initialPnl = Number((initialDiff * posData.shares).toFixed(2));
+    const initialPnlPct = Number(((initialDiff / posData.entryPrice) * 100).toFixed(2));
 
     const newPosition: PaperPosition = {
       ...posData,
       id: `pos-${Date.now()}`,
       timestamp: new Date().toISOString(),
-      pnl: 0,
-      pnlPercent: 0,
+      pnl: initialPnl,
+      pnlPercent: initialPnlPct,
     };
 
     setPaperAccount((prev) => ({
       ...prev,
-      cash: prev.cash - cost,
+      cash: Math.max(0, Number((prev.cash - requiredMargin).toFixed(2))),
       positions: [newPosition, ...prev.positions],
       tradeHistory: [
         {
@@ -1016,6 +1103,7 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
         ...prev.tradeHistory,
       ],
     }));
+    return true;
   };
 
   // Action: Close Position
@@ -1028,11 +1116,13 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
       const closePrice = asset?.price || pos.currentPrice;
       const diff = pos.side === "BUY" ? closePrice - pos.entryPrice : pos.entryPrice - closePrice;
       const pnl = diff * pos.shares;
-      const proceeds = pos.shares * pos.entryPrice + pnl;
+      const leverage = pos.orderType === "Intraday (MIS)" ? 5 : 1;
+      const marginReleased = (pos.shares * pos.entryPrice) / leverage;
+      const proceeds = marginReleased + pnl;
 
       return {
         ...prev,
-        cash: prev.cash + proceeds,
+        cash: Math.max(0, Number((prev.cash + proceeds).toFixed(2))),
         positions: prev.positions.filter((p) => p.id !== posId),
         tradeHistory: [
           {
@@ -1051,11 +1141,21 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
     });
   };
 
+  // Action: Update Custom Wallet Balance
+  const handleUpdateWalletBalance = (newBalance: number) => {
+    if (!Number.isFinite(newBalance) || newBalance <= 0) return;
+    setPaperAccount((prev) => ({
+      ...prev,
+      cash: newBalance,
+      initialBalance: newBalance,
+    }));
+  };
+
   // Action: Reset Paper Portfolio
   const handleResetPortfolio = () => {
     setPaperAccount({
-      cash: 500000,
-      initialBalance: 500000,
+      cash: 25000,
+      initialBalance: 25000,
       currency: "INR",
       positions: [],
       tradeHistory: [],
@@ -1205,9 +1305,6 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
         selectedAsset={selectedAsset}
         onSelectAsset={(asset) => {
           setSelectedAsset(asset);
-          if (!signalsMap[asset.symbol]) {
-            handleGenerateSignal("Indian Momentum Breakout (NSE)", "Moderate (1.5%)");
-          }
         }}
         assets={assets}
         paperAccount={paperAccount}
@@ -1295,9 +1392,6 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
             onSelectAsset={(asset) => {
               setSelectedAsset(asset);
               setActiveTab("terminal");
-              if (!signalsMap[asset.symbol]) {
-                handleGenerateSignal("Indian Momentum Breakout (NSE)", "Moderate (1.5%)");
-              }
             }}
             onOpenResearch={(asset) => {
               setSelectedAsset(asset);
@@ -1317,6 +1411,7 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
               <TradingChart
                 asset={selectedAsset}
                 activeSignal={activeSignal}
+                customSetup={activeCustomSetup}
                 timeframe={timeframe}
                 setTimeframe={setTimeframe}
                 isLiveSyncing={isLiveSyncing}
@@ -1327,10 +1422,14 @@ ${ticker} is currently evaluated under Indian market conditions (NSE/BSE). Insti
               <AgentSignalCard
                 asset={selectedAsset}
                 activeSignal={activeSignal}
+                customSetup={activeCustomSetup}
+                onUpdateCustomSetup={handleUpdateCustomSetup}
+                onResetCustomSetup={handleResetCustomSetup}
                 onGenerateSignal={handleGenerateSignal}
                 isLoading={isGeneratingSignal}
                 onExecuteTrade={handleExecuteTrade}
                 availableCash={paperAccount.cash}
+                onUpdateWalletBalance={handleUpdateWalletBalance}
                 growwConfig={growwConfig}
                 onOpenGrowwModal={() => setIsGrowwModalOpen(true)}
                 onExecuteGrowwLiveTrade={handleExecuteGrowwLiveTrade}

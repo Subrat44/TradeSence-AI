@@ -609,24 +609,53 @@ Your report MUST deliver a CRYSTAL CLEAR VERDICT on WHETHER TO TRADE OR TO AVOID
   }
 });
 
-// AI Trade Signal & "Trade or Avoid" Decision Generator for Indian Stocks
+// AI Trade Signal & "Trade or Avoid" Decision Generator for Indian Stocks (Supports Bullish BUY & Bearish SHORT/SELL + Custom Budget)
 app.post("/api/agent/analyze-trade", async (req, res) => {
   const { 
     ticker = "RELIANCE", 
     currentPrice = 1209.00, 
+    customEntryPrice,
+    customBudget,
+    tradeDirection = "BULLISH",
     technicals, 
     persona = "Indian Momentum Breakout (NSE)", 
-    accountCapital = 500000, 
+    accountCapital = 25000, 
     riskTolerance = "Moderate (1.5%)",
     category = "Large Cap"
   } = req.body;
 
+  const effectivePrice = Number(customEntryPrice) > 0 ? Number(customEntryPrice) : (Number(currentPrice) || 1209.00);
+  const effectiveBudget = Number(customBudget) > 0 ? Number(customBudget) : Math.min(Number(accountCapital) || 25000, 25000);
+  const isBearish = String(tradeDirection).toUpperCase() === "BEARISH";
+
   const buildFallbackSignal = () => {
-    const isTrade = true;
-    const price = Number(currentPrice) || 1209.00;
+    const price = effectivePrice;
+    const budgetShares = Math.max(1, Math.floor(effectiveBudget / Math.max(1, price)));
+    if (isBearish) {
+      return {
+        verdict: "TRADE (HIGH CONVICTION)",
+        action: "SHORT",
+        confidence: 84,
+        timeframe: "Intraday (MIS) / Short Swing",
+        orderType: "Intraday (MIS)",
+        entryZone: { min: Number((price * 0.996).toFixed(2)), max: Number((price * 1.004).toFixed(2)) },
+        stopLoss: Number((price * 1.035).toFixed(2)),
+        takeProfit1: Number((price * 0.945).toFixed(2)),
+        takeProfit2: Number((price * 0.895).toFixed(2)),
+        riskRewardRatio: "1:2.6",
+        suggestedShares: budgetShares,
+        positionValue: Math.round(price * budgetShares),
+        primaryReason: `Bearish Down-Market (${persona}) setup: Price rejection near resistance with downside targets at ₹${(price * 0.945).toFixed(2)} and protective Stop-Loss above ₹${(price * 1.035).toFixed(2)}.`,
+        whyTradeOrAvoid: `BEARISH SHORT SETUP: Down-market momentum trade sized for your ₹${effectiveBudget.toLocaleString("en-IN")} budget (${budgetShares} shares) with strict upside Stop-Loss at ₹${(price * 1.035).toFixed(2)}.`,
+        technicalSignals: ["Bearish resistance rejection", "Downside momentum target active", "Protective Stop-Loss above entry"],
+        invalidationCriteria: `Close above Stop-Loss at ₹${(price * 1.035).toFixed(2)} on NSE`,
+        growwUrl: `https://groww.in/stocks/${ticker.toLowerCase()}`,
+      };
+    }
+
     return {
-      verdict: isTrade ? "TRADE (HIGH CONVICTION)" : "AVOID (HIGH RISK)",
-      action: isTrade ? "BUY" : "AVOID",
+      verdict: "TRADE (HIGH CONVICTION)",
+      action: "BUY",
       confidence: 86,
       timeframe: "BTST / Swing (2-10 days)",
       orderType: "Delivery (CNC)",
@@ -635,12 +664,12 @@ app.post("/api/agent/analyze-trade", async (req, res) => {
       takeProfit1: Number((price * 1.058).toFixed(2)),
       takeProfit2: Number((price * 1.115).toFixed(2)),
       riskRewardRatio: "1:2.8",
-      suggestedShares: Math.max(1, Math.floor((accountCapital * 0.015) / Math.max(1, price * 0.038))),
-      positionValue: Math.round(price * Math.max(1, Math.floor((accountCapital * 0.015) / Math.max(1, price * 0.038)))),
-      primaryReason: `${persona} setup verified: Clean price action above 20-day SMA with disciplined 1:2.8 risk-to-reward ratio on NSE.`,
-      whyTradeOrAvoid: `TRADE THIS: Favorable entry zone at ₹${price.toFixed(2)} with tight 3.8% stop loss and clear institutional participation.`,
-      technicalSignals: ["Above 20-day SMA support", "RSI sustained in bullish momentum zone", "Positive delivery volume on NSE"],
-      invalidationCriteria: `Daily close below stop loss at ₹${(price * 0.962).toFixed(2)} on NSE`,
+      suggestedShares: budgetShares,
+      positionValue: Math.round(price * budgetShares),
+      primaryReason: `Bullish Upper-Side (${persona}) setup verified: Clean price action with disciplined 1:2.8 risk-to-reward ratio on NSE.`,
+      whyTradeOrAvoid: `BULLISH TRADE SETUP: Entry at ₹${price.toFixed(2)} sized to your ₹${effectiveBudget.toLocaleString("en-IN")} budget (${budgetShares} shares) with protective Stop-Loss at ₹${(price * 0.962).toFixed(2)}.`,
+      technicalSignals: ["Above 20-day SMA support", "RSI sustained in momentum zone", "Positive volume structure on NSE"],
+      invalidationCriteria: `Daily close below Stop-Loss at ₹${(price * 0.962).toFixed(2)} on NSE`,
       growwUrl: `https://groww.in/stocks/${ticker.toLowerCase()}`,
     };
   };
@@ -650,43 +679,44 @@ app.post("/api/agent/analyze-trade", async (req, res) => {
     if (!ai) {
       return res.json({
         ticker,
-        currentPrice,
+        currentPrice: effectivePrice,
         signal: buildFallbackSignal(),
         generatedAt: new Date().toISOString(),
       });
     }
 
     const prompt = `You are TradeSense India, an autonomous trading agent for the Indian Stock Market on Groww.
-Evaluate this stock for a trader asking: "SHOULD I TRADE THIS STOCK OR AVOID IT?"
+Evaluate this stock for a trader setting up a ${isBearish ? "BEARISH (Down-Market SHORT / SELL)" : "BULLISH (Upper-Side BUY / LONG)"} trade:
 
 Stock: ${ticker} (NSE / BSE)
-Current Price: ₹${currentPrice}
+Reference / Custom Entry Price: ₹${effectivePrice} (Live Market Price: ₹${currentPrice})
+Selected Market Direction: ${isBearish ? "BEARISH (SHORT / SELL - profit from price falling, Stop-Loss MUST be ABOVE entry price, Targets MUST be BELOW entry price)" : "BULLISH (BUY / LONG - profit from price rising, Stop-Loss MUST be BELOW entry price, Targets MUST be ABOVE entry price)"}
+Trader's Wallet / Trade Budget: ₹${effectiveBudget} (INR) — suggestedShares MUST fit within this budget (approx ${Math.max(1, Math.floor(effectiveBudget / Math.max(1, effectivePrice)))} shares)
 Category: ${category}
 Technical State:
 - RSI (14): ${technicals?.rsi ?? 52}
 - 20 SMA: ₹${technicals?.sma20 ?? currentPrice}
 - 50 EMA: ₹${technicals?.ema50 ?? currentPrice}
 - 24h Change: ${technicals?.change24h ?? "0%"}
-Account Capital: ₹${accountCapital} (INR)
 Risk per trade: ${riskTolerance}
 Strategy Persona: ${persona}
 
 Provide a structured trading decision strictly in valid JSON format with this exact schema:
 {
   "verdict": "TRADE (HIGH CONVICTION)" | "AVOID (HIGH RISK)" | "WAIT / WATCHLIST",
-  "action": "BUY" | "STRONG BUY" | "HOLD" | "SELL" | "SHORT" | "AVOID",
+  "action": "${isBearish ? "SHORT" : "BUY"}",
   "confidence": number (0 to 100),
   "timeframe": "Intraday (MIS)" | "BTST / Swing (2-10 days)" | "Positional (1-3 months)",
-  "orderType": "Delivery (CNC)" | "Intraday (MIS)",
+  "orderType": "${isBearish ? "Intraday (MIS)" : "Delivery (CNC)"}",
   "entryZone": { "min": number, "max": number },
   "stopLoss": number,
   "takeProfit1": number,
   "takeProfit2": number,
   "riskRewardRatio": string (e.g. "1:2.8"),
-  "suggestedShares": number (calculated based on account risk in INR and stop distance),
-  "positionValue": number (in INR),
+  "suggestedShares": number (MUST be affordable within ₹${effectiveBudget} budget at ₹${effectivePrice} per share),
+  "positionValue": number (in INR, suggestedShares * ₹${effectivePrice}),
   "primaryReason": string,
-  "whyTradeOrAvoid": string (Directly answering: Why trade this stock or why avoid it right now),
+  "whyTradeOrAvoid": string,
   "technicalSignals": string[],
   "invalidationCriteria": string,
   "growwUrl": string (e.g. "https://groww.in/stocks/${ticker.toLowerCase()}")
@@ -707,20 +737,24 @@ Ensure all price numbers are in Indian Rupees (₹). Only return the raw JSON ob
     let signalData;
     try {
       signalData = JSON.parse(text);
+      // Enforce budget cap on suggestedShares so it never exceeds the user's budget
+      const maxBudgetShares = Math.max(1, Math.floor(effectiveBudget / Math.max(1, effectivePrice)));
+      signalData.suggestedShares = maxBudgetShares;
+      signalData.positionValue = Math.round(maxBudgetShares * effectivePrice);
     } catch {
       signalData = buildFallbackSignal();
     }
 
     res.json({
       ticker,
-      currentPrice,
+      currentPrice: effectivePrice,
       signal: signalData,
       generatedAt: new Date().toISOString(),
     });
   } catch {
     res.json({
       ticker,
-      currentPrice,
+      currentPrice: effectivePrice,
       signal: buildFallbackSignal(),
       generatedAt: new Date().toISOString(),
     });

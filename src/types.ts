@@ -55,6 +55,19 @@ export type AgentPersona =
   | "FII/DII Flow & Swing"
   | "Value & Fundamentals (Groww)";
 
+export type TradeDirection = "BULLISH" | "BEARISH";
+
+export interface CustomTradeSetup {
+  direction: TradeDirection;
+  customPrice: string;
+  customBudget: string;
+  customShares: string;
+  customStopLoss: string;
+  customTarget1: string;
+  customTarget2: string;
+  orderType: "Delivery (CNC)" | "Intraday (MIS)";
+}
+
 export interface TradeSignal {
   action: "BUY" | "STRONG BUY" | "HOLD" | "SELL" | "SHORT" | "AVOID";
   verdict: TradeVerdict;

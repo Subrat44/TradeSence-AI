@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useRef } from "react";
-import { Asset, Candle, TradeSignal } from "../../types";
+import { Asset, Candle, TradeSignal, CustomTradeSetup } from "../../types";
 import { 
   Eye, 
   EyeOff, 
   TrendingUp, 
+  TrendingDown,
   Crosshair, 
   BarChart2, 
   Target,
@@ -15,6 +16,7 @@ import {
 interface TradingChartProps {
   asset: Asset;
   activeSignal: TradeSignal | null;
+  customSetup?: CustomTradeSetup;
   timeframe: string;
   setTimeframe: (tf: string) => void;
   isLiveSyncing?: boolean;
@@ -25,6 +27,7 @@ interface TradingChartProps {
 export const TradingChart: React.FC<TradingChartProps> = ({
   asset,
   activeSignal,
+  customSetup,
   timeframe,
   setTimeframe,
   isLiveSyncing = false,
@@ -42,12 +45,95 @@ export const TradingChart: React.FC<TradingChartProps> = ({
 
   const candles = asset.history;
 
+  // Resolve combined Custom User Setup + AI Signal levels for the chart
+  const chartSetupLevels = useMemo(() => {
+    const hasCustomPrice = Number(customSetup?.customPrice) > 0;
+    const hasCustomSL = Number(customSetup?.customStopLoss) > 0;
+    const hasCustomTP1 = Number(customSetup?.customTarget1) > 0;
+    const hasCustomTP2 = Number(customSetup?.customTarget2) > 0;
+    const hasCustomBudget = Number(customSetup?.customBudget) > 0;
+    const hasCustomShares = Number(customSetup?.customShares) > 0;
+
+    const isBearish = customSetup
+      ? customSetup.direction === "BEARISH"
+      : activeSignal?.action === "SHORT" || activeSignal?.action === "SELL";
+
+    if (!hasCustomPrice && !hasCustomSL && !hasCustomTP1 && !hasCustomBudget && !hasCustomShares && !activeSignal) {
+      return null;
+    }
+
+    const baseEntry = hasCustomPrice
+      ? Number(customSetup!.customPrice)
+      : activeSignal?.entryZone?.min || asset.price;
+
+    const resolvedSL = hasCustomSL
+      ? Number(customSetup!.customStopLoss)
+      : activeSignal?.stopLoss
+      ? isBearish && activeSignal.stopLoss < baseEntry
+        ? Number((baseEntry * 1.035).toFixed(2))
+        : !isBearish && activeSignal.stopLoss > baseEntry
+        ? Number((baseEntry * 0.962).toFixed(2))
+        : activeSignal.stopLoss
+      : Number((baseEntry * (isBearish ? 1.035 : 0.962)).toFixed(2));
+
+    const resolvedTP1 = hasCustomTP1
+      ? Number(customSetup!.customTarget1)
+      : activeSignal?.takeProfit1
+      ? isBearish && activeSignal.takeProfit1 > baseEntry
+        ? Number((baseEntry * 0.945).toFixed(2))
+        : !isBearish && activeSignal.takeProfit1 < baseEntry
+        ? Number((baseEntry * 1.058).toFixed(2))
+        : activeSignal.takeProfit1
+      : Number((baseEntry * (isBearish ? 0.945 : 1.058)).toFixed(2));
+
+    const resolvedTP2 = hasCustomTP2
+      ? Number(customSetup!.customTarget2)
+      : activeSignal?.takeProfit2
+      ? isBearish && activeSignal.takeProfit2 > baseEntry
+        ? Number((baseEntry * 0.895).toFixed(2))
+        : !isBearish && activeSignal.takeProfit2 < baseEntry
+        ? Number((baseEntry * 1.115).toFixed(2))
+        : activeSignal.takeProfit2
+      : Number((baseEntry * (isBearish ? 0.895 : 1.115)).toFixed(2));
+
+    const leverage = customSetup?.orderType === "Intraday (MIS)" ? 5 : 1;
+    const effectiveCostPerShare = baseEntry / leverage;
+
+    let resolvedShares: number | null = null;
+    if (hasCustomShares) {
+      resolvedShares = Math.max(1, Math.floor(Number(customSetup!.customShares)));
+    } else if (hasCustomBudget) {
+      resolvedShares = Math.max(1, Math.floor(Number(customSetup!.customBudget) / Math.max(0.01, effectiveCostPerShare)));
+    } else if (activeSignal?.suggestedShares) {
+      resolvedShares = activeSignal.suggestedShares;
+    }
+
+    const perShareReward = isBearish ? baseEntry - resolvedTP1 : resolvedTP1 - baseEntry;
+    const perShareRisk = isBearish ? resolvedSL - baseEntry : baseEntry - resolvedSL;
+
+    const totalReward = resolvedShares ? resolvedShares * perShareReward : null;
+    const totalRisk = resolvedShares ? resolvedShares * Math.abs(perShareRisk) : null;
+
+    return {
+      isBearish,
+      hasCustomPrice,
+      entryPrice: baseEntry,
+      stopLoss: resolvedSL,
+      takeProfit1: resolvedTP1,
+      takeProfit2: resolvedTP2,
+      shares: resolvedShares,
+      capitalUsed: resolvedShares ? resolvedShares * effectiveCostPerShare : null,
+      totalReward,
+      totalRisk,
+    };
+  }, [customSetup, activeSignal, asset.price]);
+
   // Compute coordinate geometry for SVG
   const chartWidth = 840;
   const mainHeight = showRSI ? 290 : 380;
   const rsiHeight = showRSI ? 90 : 0;
   const volumeHeight = 65;
-  const padding = { top: 25, right: 70, bottom: 25, left: 15 };
+  const padding = { top: 25, right: 78, bottom: 25, left: 15 };
 
   const plotWidth = chartWidth - padding.left - padding.right;
   const plotHeight = mainHeight - padding.top - padding.bottom;
@@ -58,11 +144,10 @@ export const TradingChart: React.FC<TradingChartProps> = ({
     let min = Math.min(...candles.map((c) => c.low));
     let max = Math.max(...candles.map((c) => c.high));
 
-    // Also factor in agent levels if visible
-    if (activeSignal && showAgentLevels) {
-      if (activeSignal.stopLoss) min = Math.min(min, activeSignal.stopLoss);
-      if (activeSignal.takeProfit2) max = Math.max(max, activeSignal.takeProfit2);
-      if (activeSignal.entryZone?.min) min = Math.min(min, activeSignal.entryZone.min);
+    // Also factor in custom or agent levels if visible
+    if (chartSetupLevels && showAgentLevels) {
+      min = Math.min(min, chartSetupLevels.entryPrice, chartSetupLevels.stopLoss, chartSetupLevels.takeProfit1, chartSetupLevels.takeProfit2);
+      max = Math.max(max, chartSetupLevels.entryPrice, chartSetupLevels.stopLoss, chartSetupLevels.takeProfit1, chartSetupLevels.takeProfit2);
     }
 
     const margin = (max - min) * 0.08 || 5;
@@ -70,7 +155,7 @@ export const TradingChart: React.FC<TradingChartProps> = ({
       minPrice: Math.max(0.1, min - margin),
       maxPrice: max + margin,
     };
-  }, [candles, activeSignal, showAgentLevels]);
+  }, [candles, chartSetupLevels, showAgentLevels]);
 
   // Max volume for volume bars
   const maxVolume = useMemo(() => {
@@ -280,21 +365,90 @@ export const TradingChart: React.FC<TradingChartProps> = ({
               RSI (14)
             </button>
 
-            {activeSignal && (
+            {chartSetupLevels && (
               <button
                 onClick={() => setShowAgentLevels(!showAgentLevels)}
                 className={`px-2 py-1 rounded flex items-center gap-1 transition-all ${
                   showAgentLevels ? "bg-emerald-950 text-emerald-300 border border-emerald-700/60" : "text-slate-500 hover:text-slate-300"
                 }`}
-                title="Agent Trade Levels (Entry, SL, TP)"
+                title="Custom & AI Trade Levels (Entry, SL, TP)"
               >
                 <Target className="w-3 h-3 text-emerald-400" />
-                AI Levels
+                Setup Levels
               </button>
             )}
           </div>
         </div>
       </div>
+
+      {/* Live Custom Price, Direction & Budget Payoff Telemetry Strip */}
+      {chartSetupLevels && showAgentLevels && (
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-xl bg-slate-950/90 border border-slate-800 text-xs font-mono tabular-nums">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span
+              className={`px-2 py-0.5 rounded font-bold inline-flex items-center gap-1 ${
+                chartSetupLevels.isBearish
+                  ? "bg-rose-950 text-rose-400 border border-rose-800/80"
+                  : "bg-emerald-950 text-emerald-400 border border-emerald-800/80"
+              }`}
+            >
+              {chartSetupLevels.isBearish ? (
+                <>
+                  <TrendingDown className="w-3 h-3" />
+                  <span>BEARISH (SHORT / SELL)</span>
+                </>
+              ) : (
+                <>
+                  <TrendingUp className="w-3 h-3" />
+                  <span>BULLISH (BUY / LONG)</span>
+                </>
+              )}
+            </span>
+
+            <span className="text-slate-300">
+              {chartSetupLevels.hasCustomPrice ? "Custom Entry:" : "Entry:"}{" "}
+              <strong className="text-cyan-400">₹{chartSetupLevels.entryPrice.toFixed(2)}</strong>
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-slate-300">
+              SL: <strong className="text-rose-400">₹{chartSetupLevels.stopLoss.toFixed(2)}</strong>
+            </span>
+            <span className="text-slate-600">|</span>
+            <span className="text-slate-300">
+              Target 1: <strong className="text-emerald-400">₹{chartSetupLevels.takeProfit1.toFixed(2)}</strong>
+            </span>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
+            {chartSetupLevels.shares ? (
+              <>
+                <span className="px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-200">
+                  Qty: <strong className="text-white">{chartSetupLevels.shares} shares</strong>
+                  {chartSetupLevels.capitalUsed !== null && (
+                    <span className="text-slate-400 ml-1">
+                      (₹{Math.round(chartSetupLevels.capitalUsed).toLocaleString("en-IN")})
+                    </span>
+                  )}
+                </span>
+                {chartSetupLevels.totalRisk !== null && (
+                  <span className="text-rose-400">
+                    SL Risk: <strong>-₹{Math.round(chartSetupLevels.totalRisk).toLocaleString("en-IN")}</strong>
+                  </span>
+                )}
+                {chartSetupLevels.totalReward !== null && (
+                  <span className="text-emerald-400">
+                    Target Gain: <strong>+₹{Math.round(Math.max(0, chartSetupLevels.totalReward)).toLocaleString("en-IN")}</strong>
+                  </span>
+                )}
+              </>
+            ) : (
+              <span className="text-slate-400 text-[11px]">
+                Enter your budget or share quantity below to see exact ₹ payoff on chart
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* SVG Candlestick & Indicator Stage */}
       <div 
@@ -441,125 +595,145 @@ export const TradingChart: React.FC<TradingChartProps> = ({
             );
           })}
 
-          {/* AI Agent Targets / Stop Loss Lines on Chart */}
-          {activeSignal && showAgentLevels && (
+          {/* Custom & AI Agent Targets / Stop Loss Lines on Chart (Bullish & Bearish) */}
+          {chartSetupLevels && showAgentLevels && (
             <g id="ai-agent-chart-levels">
-              {/* Entry Zone */}
+              {/* Shaded Reward Zone (Between Entry & TP1) */}
+              <rect
+                x={padding.left}
+                y={Math.min(getY(chartSetupLevels.entryPrice), getY(chartSetupLevels.takeProfit1))}
+                width={plotWidth}
+                height={Math.max(2, Math.abs(getY(chartSetupLevels.takeProfit1) - getY(chartSetupLevels.entryPrice)))}
+                fill="#10b981"
+                opacity="0.06"
+              />
+
+              {/* Shaded Risk Zone (Between Entry & SL) */}
+              <rect
+                x={padding.left}
+                y={Math.min(getY(chartSetupLevels.entryPrice), getY(chartSetupLevels.stopLoss))}
+                width={plotWidth}
+                height={Math.max(2, Math.abs(getY(chartSetupLevels.stopLoss) - getY(chartSetupLevels.entryPrice)))}
+                fill="#f43f5e"
+                opacity="0.06"
+              />
+
+              {/* Entry Line */}
               <line
                 x1={padding.left}
-                y1={getY(activeSignal.entryZone.min)}
+                y1={getY(chartSetupLevels.entryPrice)}
                 x2={chartWidth - padding.right}
-                y2={getY(activeSignal.entryZone.min)}
+                y2={getY(chartSetupLevels.entryPrice)}
                 stroke="#38bdf8"
-                strokeWidth="1.5"
+                strokeWidth="1.6"
                 strokeDasharray="4 3"
               />
               <rect
                 x={chartWidth - padding.right + 4}
-                y={getY(activeSignal.entryZone.min) - 8}
-                width="60"
+                y={getY(chartSetupLevels.entryPrice) - 8}
+                width="70"
                 height="16"
                 fill="#0284c7"
                 rx="3"
               />
               <text
                 x={chartWidth - padding.right + 7}
-                y={getY(activeSignal.entryZone.min) + 3}
+                y={getY(chartSetupLevels.entryPrice) + 3}
                 fill="#ffffff"
-                fontSize="9"
+                fontSize="8.5"
                 fontWeight="bold"
                 fontFamily="monospace"
               >
-                ENTRY ₹{activeSignal.entryZone.min.toFixed(1)}
+                {chartSetupLevels.isBearish ? "SHORT" : "BUY"} ₹{chartSetupLevels.entryPrice.toFixed(1)}
               </text>
 
-              {/* Stop Loss */}
+              {/* Stop Loss Line */}
               <line
                 x1={padding.left}
-                y1={getY(activeSignal.stopLoss)}
+                y1={getY(chartSetupLevels.stopLoss)}
                 x2={chartWidth - padding.right}
-                y2={getY(activeSignal.stopLoss)}
+                y2={getY(chartSetupLevels.stopLoss)}
                 stroke="#f43f5e"
                 strokeWidth="1.8"
                 strokeDasharray="5 3"
               />
               <rect
                 x={chartWidth - padding.right + 4}
-                y={getY(activeSignal.stopLoss) - 8}
-                width="60"
+                y={getY(chartSetupLevels.stopLoss) - 8}
+                width="70"
                 height="16"
                 fill="#e11d48"
                 rx="3"
               />
               <text
                 x={chartWidth - padding.right + 7}
-                y={getY(activeSignal.stopLoss) + 3}
+                y={getY(chartSetupLevels.stopLoss) + 3}
                 fill="#ffffff"
-                fontSize="9"
+                fontSize="8.5"
                 fontWeight="bold"
                 fontFamily="monospace"
               >
-                SL ₹{activeSignal.stopLoss.toFixed(1)}
+                SL ₹{chartSetupLevels.stopLoss.toFixed(1)}
               </text>
 
               {/* Take Profit 1 */}
               <line
                 x1={padding.left}
-                y1={getY(activeSignal.takeProfit1)}
+                y1={getY(chartSetupLevels.takeProfit1)}
                 x2={chartWidth - padding.right}
-                y2={getY(activeSignal.takeProfit1)}
+                y2={getY(chartSetupLevels.takeProfit1)}
                 stroke="#10b981"
                 strokeWidth="1.8"
                 strokeDasharray="5 3"
               />
               <rect
                 x={chartWidth - padding.right + 4}
-                y={getY(activeSignal.takeProfit1) - 8}
-                width="60"
+                y={getY(chartSetupLevels.takeProfit1) - 8}
+                width="70"
                 height="16"
                 fill="#059669"
                 rx="3"
               />
               <text
                 x={chartWidth - padding.right + 7}
-                y={getY(activeSignal.takeProfit1) + 3}
+                y={getY(chartSetupLevels.takeProfit1) + 3}
                 fill="#ffffff"
-                fontSize="9"
+                fontSize="8.5"
                 fontWeight="bold"
                 fontFamily="monospace"
               >
-                TP1 ₹{activeSignal.takeProfit1.toFixed(1)}
+                TP1 ₹{chartSetupLevels.takeProfit1.toFixed(1)}
               </text>
 
               {/* Take Profit 2 */}
-              {activeSignal.takeProfit2 && (
+              {chartSetupLevels.takeProfit2 && (
                 <>
                   <line
                     x1={padding.left}
-                    y1={getY(activeSignal.takeProfit2)}
+                    y1={getY(chartSetupLevels.takeProfit2)}
                     x2={chartWidth - padding.right}
-                    y2={getY(activeSignal.takeProfit2)}
+                    y2={getY(chartSetupLevels.takeProfit2)}
                     stroke="#059669"
                     strokeWidth="1.5"
                     strokeDasharray="4 4"
                   />
                   <rect
                     x={chartWidth - padding.right + 4}
-                    y={getY(activeSignal.takeProfit2) - 8}
-                    width="60"
+                    y={getY(chartSetupLevels.takeProfit2) - 8}
+                    width="70"
                     height="16"
                     fill="#047857"
                     rx="3"
                   />
                   <text
                     x={chartWidth - padding.right + 7}
-                    y={getY(activeSignal.takeProfit2) + 3}
+                    y={getY(chartSetupLevels.takeProfit2) + 3}
                     fill="#ffffff"
-                    fontSize="9"
+                    fontSize="8.5"
                     fontWeight="bold"
                     fontFamily="monospace"
                   >
-                    TP2 ₹{activeSignal.takeProfit2.toFixed(1)}
+                    TP2 ₹{chartSetupLevels.takeProfit2.toFixed(1)}
                   </text>
                 </>
               )}
